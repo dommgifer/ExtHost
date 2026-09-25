@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <title>頁面小幫手</title>
+  <style>
+    body { margin: 0; width: 300px; font: 13px/1.5 "Segoe UI", "Microsoft JhengHei", sans-serif; color: #1C1B19; }
+    .wrap { padding: 14px; display: grid; gap: 12px; }
+    h1 { font-size: 15px; margin: 0; display: flex; justify-content: space-between; align-items: baseline; }
+    h1 small { font: 11px Consolas, monospace; color: #6B675F; font-weight: normal; }
+    label { display: flex; justify-content: space-between; align-items: center; }
+    input[type=checkbox] { width: 18px; height: 18px; accent-color: #1F5FAD; }
+    button { font: inherit; height: 34px; border-radius: 8px; border: 0; background: #1F5FAD; color: #fff; cursor: pointer; }
+    button:hover { background: #174A87; }
+    .out { font: 12px/1.4 Consolas, monospace; background: #F7F6F3; border-radius: 8px; padding: 8px; white-space: pre-wrap; min-height: 18px; }
+    a { color: #1F5FAD; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>頁面小幫手 <small id="ver"></small></h1>
+    <label>在頁面顯示面板 <input type="checkbox" id="show"></label>
+    <div>已記錄 <b id="sites">0</b> 個網站、共 <b id="total">0</b> 次造訪</div>
+    <button id="ping">Ping 背景 service worker</button>
+    <div class="out" id="out">popup 已載入 ✓</div>
+    <a href="#" id="options">開啟選項頁</a>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

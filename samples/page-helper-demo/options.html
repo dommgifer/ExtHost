@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <title>頁面小幫手 · 選項</title>
+  <style>
+    body { margin: 0; font: 14px/1.6 "Segoe UI", "Microsoft JhengHei", sans-serif; color: #1C1B19; background: #F7F6F3; }
+    main { max-width: 560px; margin: 40px auto; background: #fff; border: 1px solid #E4E1DA; border-radius: 12px; padding: 24px 28px; }
+    h1 { font-size: 20px; margin: 0 0 16px; }
+    fieldset { border: 0; padding: 0; margin: 0 0 16px; }
+    legend { font-weight: 700; margin-bottom: 6px; }
+    label { margin-right: 16px; }
+    button { font: inherit; height: 36px; padding: 0 16px; border-radius: 8px; border: 1px solid #D5D1C8; background: #fff; cursor: pointer; }
+    button:hover { background: #F7F6F3; }
+    pre { background: #F7F6F3; border-radius: 8px; padding: 10px; font: 12px Consolas, monospace; overflow: auto; }
+    .ok { color: #1E5B4D; margin-left: 8px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>頁面小幫手 · 選項</h1>
+    <fieldset>
+      <legend>面板位置</legend>
+      <label><input type="radio" name="side" value="right"> 右下角</label>
+      <label><input type="radio" name="side" value="left"> 左下角</label>
+      <span class="ok" id="saved"></span>
+    </fieldset>
+    <fieldset>
+      <legend>造訪紀錄（chrome.storage.local）</legend>
+      <pre id="dump">{}</pre>
+      <button id="clear">清除紀錄</button>
+    </fieldset>
+  </main>
+  <script src="options.js"></script>
+</body>
+</html>

@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>ExtHost</RootNamespace>
+    <AssemblyName>ExtHost</AssemblyName>
+    <Version>0.1.0</Version>
+    <Product>ExtHost</Product>
+    <Description>WebView2 瀏覽器，可載入自製擴充功能</Description>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+
+    <!-- 允許在非 Windows 環境編譯 -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+
+    <!-- 發佈成單一獨立執行檔（不需安裝 .NET） -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <DebugType>none</DebugType>
+    <InvariantGlobalization>false</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4191.47" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\app.ico" />
+  </ItemGroup>
+
+  <!-- 不要把 WebView2 的 XML 文件檔複製到輸出資料夾 -->
+  <Target Name="RemoveWebView2Xml" AfterTargets="Publish">
+    <ItemGroup>
+      <_XmlToDelete Include="$(PublishDir)*.xml" />
+    </ItemGroup>
+    <Delete Files="@(_XmlToDelete)" />
+  </Target>
+
+</Project>

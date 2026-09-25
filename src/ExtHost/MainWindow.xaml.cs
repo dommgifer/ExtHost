@@ -1,0 +1,1030 @@
+using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Shell;
+using ExtHost.Services;
+using ExtHost.Tabs;
+using Microsoft.Web.WebView2.Core;
+
+namespace ExtHost;
+
+public partial class MainWindow : Window, IBrowserShell
+{
+    private readonly ObservableCollection<TabBase> _tabs = new();
+    private CoreWebView2Environment? _env;
+    private bool _isFullScreen;
+    private WindowState _stateBeforeFullScreen;
+    private bool _isClosing;
+
+    public AppSettings Settings => App.Settings;
+
+    public ExtensionManager? Extensions { get; private set; }
+
+    private TabBase? SelectedTab => TabList.SelectedItem as TabBase;
+
+    public MainWindow()
+    {
+        InitializeComponent();
+        TabList.ItemsSource = _tabs;
+
+        RestorePlacement();
+        ApplyDevMode();
+
+        Loaded += OnLoaded;
+        Closing += OnClosing;
+        StateChanged += (_, _) => UpdateMaximizeState();
+        SourceInitialized += (_, _) =>
+        {
+            if (Settings.WindowMaximized)
+            {
+                WindowState = WindowState.Maximized;
+            }
+            UpdateMaximizeState();
+        };
+        PreviewKeyDown += OnPreviewKeyDown;
+    }
+
+    // ======================= 啟動 =======================
+
+    private async void OnLoaded(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            _env = await BrowserEnvironment.GetAsync();
+        }
+        catch (Exception ex)
+        {
+            AppPaths.Log("建立 WebView2 環境失敗：" + ex);
+            MessageBox.Show(this, "無法啟動 WebView2：\n" + ex.Message + "\n\n若另一個 ExtHost 正以不同設定執行，請先關閉它。",
+                "ExtHost", MessageBoxButton.OK, MessageBoxImage.Error);
+            Close();
+            return;
+        }
+
+        RuntimeText.Text = "WebView2 " + _env.BrowserVersionString;
+        ProfileText.Text = AppPaths.IsPortable ? "可攜模式" : "";
+
+        WebTab first;
+        try
+        {
+            first = await CreateWebTabAsync(null, select: true);
+        }
+        catch (Exception ex)
+        {
+            AppPaths.Log("建立分頁失敗：" + ex);
+            MessageBox.Show(this, "無法建立瀏覽器分頁：\n" + ex.Message, "ExtHost", MessageBoxButton.OK, MessageBoxImage.Error);
+            Close();
+            return;
+        }
+
+        // 擴充功能要在第一個頁面載入前準備好，content script 才會注入到第一頁
+        if (first.Core != null)
+        {
+            Extensions = new ExtensionManager(first.Core.Profile, Settings, Dispatcher);
+            Extensions.Changed += (_, _) => UpdateExtensionUi();
+            Extensions.Reloaded += (_, _) => OnExtensionsReloaded();
+            Extensions.Error += (_, msg) => ShowError(msg);
+            ExtToolbar.ItemsSource = Extensions.ToolbarItems;
+            try
+            {
+                await Extensions.InitializeAsync();
+            }
+            catch (Exception ex)
+            {
+                AppPaths.Log("初始化擴充功能失敗：" + ex);
+                ShowError("初始化擴充功能失敗：" + ExtensionManager.Describe(ex)
+                    + "\n\n可能原因：WebView2 Runtime 版本太舊（需支援擴充功能），或組織政策停用了此功能。");
+            }
+            UpdateExtensionUi();
+        }
+
+        // 還原上次的分頁
+        var urls = Settings.RestoreSession
+            ? Settings.LastSession.Where(u => !string.IsNullOrWhiteSpace(u)).ToList()
+            : new List<string>();
+        if (urls.Count == 0)
+        {
+            urls.Add(Settings.HomePage);
+        }
+
+        var firstUsed = false;
+        foreach (var url in urls)
+        {
+            if (url == UrlHelper.ExtensionsPageUrl)
+            {
+                OpenExtensionsTab(select: false);
+            }
+            else if (!firstUsed)
+            {
+                firstUsed = true;
+                if (!UrlHelper.IsBlank(url))
+                {
+                    first.Navigate(url);
+                }
+            }
+            else
+            {
+                try
+                {
+                    await CreateWebTabAsync(url, select: false);
+                }
+                catch (Exception ex)
+                {
+                    AppPaths.Log("還原分頁失敗：" + ex.Message);
+                }
+            }
+        }
+
+        TabList.SelectedItem = first;
+        if (UrlHelper.IsBlank(first.Url))
+        {
+            FocusAddressBar();
+        }
+    }
+
+    // ======================= 分頁 =======================
+
+    private async Task<WebTab> CreateWebTabAsync(string? url, bool select, int? index = null)
+    {
+        if (_env == null)
+        {
+            throw new InvalidOperationException("WebView2 環境尚未就緒");
+        }
+
+        var tab = new WebTab();
+        tab.View.Visibility = Visibility.Hidden;
+        ContentHost.Children.Add(tab.View);
+
+        if (index is { } i && i >= 0 && i <= _tabs.Count)
+        {
+            _tabs.Insert(i, tab);
+        }
+        else
+        {
+            _tabs.Add(tab);
+        }
+
+        tab.PropertyChanged += Tab_PropertyChanged;
+        tab.NewWindowRequested += OnNewWindowRequested;
+        tab.CloseRequested += (_, _) => CloseTab(tab);
+        tab.FullScreenChanged += (_, full) =>
+        {
+            if (tab == SelectedTab)
+            {
+                SetFullScreen(full);
+            }
+        };
+
+        if (select)
+        {
+            TabList.SelectedItem = tab;
+        }
+
+        await tab.InitializeAsync(_env);
+
+        if (url != null && !UrlHelper.IsBlank(url))
+        {
+            tab.Navigate(url);
+        }
+        return tab;
+    }
+
+    public void OpenInNewTab(string url)
+    {
+        var index = SelectedTab != null ? _tabs.IndexOf(SelectedTab) + 1 : (int?)null;
+        _ = CreateTabSafeAsync(url, index);
+    }
+
+    private async Task CreateTabSafeAsync(string? url, int? index)
+    {
+        try
+        {
+            var tab = await CreateWebTabAsync(url, select: true, index: index);
+            if (UrlHelper.IsBlank(url))
+            {
+                FocusAddressBar();
+            }
+            else
+            {
+                tab.WebView.Focus();
+            }
+        }
+        catch (Exception ex)
+        {
+            ShowError("無法開啟新分頁：" + ex.Message);
+        }
+    }
+
+    private void OpenExtensionsTab(bool select = true)
+    {
+        var existing = _tabs.OfType<ExtensionsTab>().FirstOrDefault();
+        if (existing == null)
+        {
+            existing = new ExtensionsTab(this);
+            existing.View.Visibility = Visibility.Hidden;
+            ContentHost.Children.Add(existing.View);
+            var index = SelectedTab != null ? _tabs.IndexOf(SelectedTab) + 1 : _tabs.Count;
+            _tabs.Insert(Math.Min(index, _tabs.Count), existing);
+            existing.PropertyChanged += Tab_PropertyChanged;
+        }
+        if (select)
+        {
+            TabList.SelectedItem = existing;
+        }
+    }
+
+    private void CloseTab(TabBase tab)
+    {
+        var index = _tabs.IndexOf(tab);
+        if (index < 0)
+        {
+            return;
+        }
+
+        var wasSelected = SelectedTab == tab;
+        tab.PropertyChanged -= Tab_PropertyChanged;
+        _tabs.RemoveAt(index);
+        ContentHost.Children.Remove(tab.View);
+        tab.Close();
+
+        if (_tabs.Count == 0)
+        {
+            if (!_isClosing)
+            {
+                Close();
+            }
+            return;
+        }
+
+        if (wasSelected)
+        {
+            TabList.SelectedItem = _tabs[Math.Min(index, _tabs.Count - 1)];
+        }
+    }
+
+    private async void OnNewWindowRequested(object? sender, CoreWebView2NewWindowRequestedEventArgs e)
+    {
+        var deferral = e.GetDeferral();
+        try
+        {
+            var index = sender is TabBase src ? _tabs.IndexOf(src) + 1 : (int?)null;
+            var tab = await CreateWebTabAsync(null, select: true, index: index);
+            if (tab.Core != null)
+            {
+                e.NewWindow = tab.Core;
+                e.Handled = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            AppPaths.Log("處理新視窗失敗：" + ex);
+        }
+        finally
+        {
+            deferral.Complete();
+        }
+    }
+
+    private void TabList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        var selected = SelectedTab;
+        foreach (var t in _tabs)
+        {
+            t.View.Visibility = t == selected ? Visibility.Visible : Visibility.Hidden;
+        }
+
+        if (_isFullScreen)
+        {
+            SetFullScreen(false);
+        }
+
+        UpdateToolbar();
+        HoverText.Text = "";
+
+        if (selected != null)
+        {
+            if (selected is WebTab w && UrlHelper.IsBlank(w.Url))
+            {
+                FocusAddressBar();
+            }
+            else
+            {
+                selected.OnActivated();
+            }
+        }
+    }
+
+    private void Tab_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (sender != SelectedTab)
+        {
+            return;
+        }
+        if (e.PropertyName == nameof(WebTab.StatusText) && sender is WebTab w)
+        {
+            HoverText.Text = w.StatusText;
+            return;
+        }
+        UpdateToolbar();
+    }
+
+    private void TabItem_MouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton == MouseButton.Middle && (sender as FrameworkElement)?.DataContext is TabBase tab)
+        {
+            CloseTab(tab);
+            e.Handled = true;
+        }
+    }
+
+    private void CloseTabButton_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is TabBase tab)
+        {
+            CloseTab(tab);
+        }
+    }
+
+    private void NewTab_Click(object sender, RoutedEventArgs e) => _ = CreateTabSafeAsync(Settings.HomePage, null);
+
+    private void SelectTabByOffset(int offset)
+    {
+        if (_tabs.Count == 0)
+        {
+            return;
+        }
+        var i = SelectedTab != null ? _tabs.IndexOf(SelectedTab) : 0;
+        i = ((i + offset) % _tabs.Count + _tabs.Count) % _tabs.Count;
+        TabList.SelectedItem = _tabs[i];
+    }
+
+    // ======================= 工具列 =======================
+
+    private void UpdateToolbar()
+    {
+        var tab = SelectedTab;
+        if (tab == null)
+        {
+            return;
+        }
+
+        Title = string.IsNullOrWhiteSpace(tab.Title) ? "ExtHost" : tab.Title + " - ExtHost";
+
+        if (tab is WebTab w)
+        {
+            BackButton.IsEnabled = w.CanGoBack;
+            ForwardButton.IsEnabled = w.CanGoForward;
+            ReloadButton.IsEnabled = true;
+            ReloadButton.Content = w.IsLoading ? "" : "";
+            ReloadButton.ToolTip = w.IsLoading ? "停止載入" : "重新整理 (F5)";
+        }
+        else
+        {
+            BackButton.IsEnabled = false;
+            ForwardButton.IsEnabled = false;
+            ReloadButton.IsEnabled = true;
+            ReloadButton.Content = "";
+        }
+
+        var url = tab.Url;
+        if (!AddressBox.IsKeyboardFocusWithin)
+        {
+            AddressBox.Text = UrlHelper.IsBlank(url) ? "" : url;
+        }
+
+        SecurityIcon.Text = UrlHelper.IsSecure(url) ? ""
+            : UrlHelper.IsExtensionUrl(url) || tab is ExtensionsTab ? ""
+            : UrlHelper.IsBlank(url) ? ""
+            : "";
+        SecurityIcon.ToolTip = UrlHelper.IsSecure(url) ? "安全連線 (HTTPS)"
+            : UrlHelper.IsBlank(url) ? null
+            : tab is ExtensionsTab || UrlHelper.IsExtensionUrl(url) ? "擴充功能頁面"
+            : "非加密連線";
+
+        UpdateInjectChip();
+    }
+
+    private void UpdateInjectChip()
+    {
+        var url = SelectedTab?.Url;
+        var matches = Extensions?.MatchingContentScripts(url) ?? new List<ExtensionItem>();
+        if (matches.Count == 0 || SelectedTab is not WebTab)
+        {
+            InjectChip.Visibility = Visibility.Collapsed;
+            return;
+        }
+        var names = matches.Select(m => m.Name).ToList();
+        InjectChipText.Text = names.Count <= 2
+            ? "注入：" + string.Join("、", names)
+            : $"注入：{names[0]} 等 {names.Count} 個";
+        InjectChip.ToolTip = "此頁面符合下列擴充功能的 content_scripts 規則：\n" + string.Join("\n", names);
+        InjectChip.Visibility = Visibility.Visible;
+    }
+
+    private void UpdateExtensionUi()
+    {
+        if (Extensions == null)
+        {
+            ExtCountText.Text = "";
+            return;
+        }
+        ExtCountText.Text = $"擴充功能：{Extensions.EnabledCount} 啟用 / {Extensions.DisabledCount} 停用";
+        UpdateInjectChip();
+    }
+
+    private void OnExtensionsReloaded()
+    {
+        if (Settings.DevMode && Settings.ReloadTabAfterExtensionReload && SelectedTab is WebTab w && !UrlHelper.IsBlank(w.Url))
+        {
+            w.Reload();
+        }
+    }
+
+    public void ApplyDevMode()
+    {
+        var v = Settings.DevMode ? Visibility.Visible : Visibility.Collapsed;
+        DevBadge.Visibility = v;
+        DevReloadButton.Visibility = v;
+    }
+
+    private void Back_Click(object sender, RoutedEventArgs e) => (SelectedTab as WebTab)?.GoBack();
+
+    private void Forward_Click(object sender, RoutedEventArgs e) => (SelectedTab as WebTab)?.GoForward();
+
+    private void Reload_Click(object sender, RoutedEventArgs e) => ReloadCurrent();
+
+    private void ReloadCurrent()
+    {
+        switch (SelectedTab)
+        {
+            case WebTab w when w.IsLoading:
+                w.Stop();
+                break;
+            case WebTab w:
+                w.Reload();
+                break;
+            case ExtensionsTab x:
+                _ = Extensions?.RefreshAsync();
+                x.OnActivated();
+                break;
+        }
+    }
+
+    private void DevTools_Click(object sender, RoutedEventArgs e) => (SelectedTab as WebTab)?.OpenDevTools();
+
+    private async void ReloadExtensions_Click(object sender, RoutedEventArgs e)
+    {
+        if (Extensions != null)
+        {
+            await Extensions.ReloadAllAsync();
+        }
+    }
+
+    // ======================= 網址列 =======================
+
+    private void FocusAddressBar()
+    {
+        Dispatcher.BeginInvoke(() =>
+        {
+            AddressBox.Focus();
+            Keyboard.Focus(AddressBox);
+            AddressBox.SelectAll();
+        }, System.Windows.Threading.DispatcherPriority.Input);
+    }
+
+    private void AddressBox_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (!AddressBox.IsKeyboardFocusWithin)
+        {
+            AddressBox.Focus();
+            e.Handled = true;
+        }
+    }
+
+    private void AddressBox_GotKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+    {
+        AddressBox.SelectAll();
+        AddressBorder.BorderBrush = (Brush)FindResource("AccentBrush");
+        AddressBorder.Background = Brushes.White;
+    }
+
+    private void AddressBox_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+    {
+        AddressBorder.BorderBrush = Brushes.Transparent;
+        AddressBorder.Background = (Brush)FindResource("AddressBrush");
+        UpdateToolbar();
+    }
+
+    private void AddressBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter)
+        {
+            NavigateFromAddressBar(AddressBox.Text);
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Escape)
+        {
+            var url = SelectedTab?.Url;
+            AddressBox.Text = UrlHelper.IsBlank(url) ? "" : url;
+            AddressBox.SelectAll();
+            e.Handled = true;
+        }
+    }
+
+    private void NavigateFromAddressBar(string text)
+    {
+        if (text.Trim().Equals(UrlHelper.ExtensionsPageUrl, StringComparison.OrdinalIgnoreCase))
+        {
+            OpenExtensionsTab();
+            return;
+        }
+
+        var url = UrlHelper.ToNavigableUrl(text, Settings.SearchUrl);
+        if (url == null)
+        {
+            return;
+        }
+
+        if (SelectedTab is WebTab w)
+        {
+            w.Navigate(url);
+            w.WebView.Focus();
+        }
+        else
+        {
+            _ = CreateTabSafeAsync(url, null);
+        }
+    }
+
+    // ======================= 擴充功能 UI =======================
+
+    public void ShowExtensionPopup(ExtensionItem item, FrameworkElement anchor)
+    {
+        if (item.HasPopup)
+        {
+            _ = ExtensionPopupWindow.ShowForAsync(item, anchor, this);
+        }
+    }
+
+    private void ExtButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button b && b.Tag is ExtensionItem item)
+        {
+            if (item.HasPopup)
+            {
+                ShowExtensionPopup(item, b);
+            }
+            else
+            {
+                ShowExtensionContextMenu(item, b);
+            }
+        }
+    }
+
+    private void ExtButton_RightClick(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is Button b && b.Tag is ExtensionItem item)
+        {
+            ShowExtensionContextMenu(item, b);
+            e.Handled = true;
+        }
+    }
+
+    private void ShowExtensionContextMenu(ExtensionItem item, FrameworkElement anchor)
+    {
+        var menu = new ContextMenu { PlacementTarget = anchor, Placement = PlacementMode.Bottom };
+        menu.Items.Add(new MenuItem { Header = $"{item.Name} {item.Version}", IsEnabled = false, FontWeight = FontWeights.SemiBold });
+        menu.Items.Add(new Separator());
+        if (item.HasPopup)
+        {
+            menu.Items.Add(MakeMenuItem("開啟 popup", () => ShowExtensionPopup(item, anchor)));
+        }
+        if (item.HasOptions)
+        {
+            menu.Items.Add(MakeMenuItem("選項", () => OpenInNewTab(item.OptionsUrl!)));
+        }
+        if (item.HasPath)
+        {
+            menu.Items.Add(MakeMenuItem("重新載入", async () => { if (Extensions != null) { await Extensions.ReloadAsync(item); } }));
+        }
+        menu.Items.Add(MakeMenuItem("停用", async () => { if (Extensions != null) { await Extensions.SetEnabledAsync(item, false); } }));
+        menu.Items.Add(new Separator());
+        menu.Items.Add(MakeMenuItem("管理擴充功能", () => OpenExtensionsTab()));
+        menu.IsOpen = true;
+    }
+
+    private void ExtMenu_Click(object sender, RoutedEventArgs e)
+    {
+        var menu = new ContextMenu { PlacementTarget = (UIElement)sender, Placement = PlacementMode.Bottom };
+        if (Extensions == null || Extensions.Items.Count == 0)
+        {
+            menu.Items.Add(new MenuItem { Header = "尚未載入擴充功能", IsEnabled = false });
+        }
+        else
+        {
+            foreach (var item in Extensions.Items)
+            {
+                var captured = item;
+                var mi = new MenuItem
+                {
+                    Header = item.Name + (item.IsInstalled ? "" : "（未載入）"),
+                    IsCheckable = true,
+                    IsChecked = item.IsInstalled && item.IsEnabled,
+                    ToolTip = item.IsEnabled ? "點擊停用" : "點擊啟用",
+                    StaysOpenOnClick = false,
+                };
+                mi.Click += async (_, _) => await Extensions.SetEnabledAsync(captured, !(captured.IsInstalled && captured.IsEnabled));
+                menu.Items.Add(mi);
+            }
+        }
+        menu.Items.Add(new Separator());
+        menu.Items.Add(MakeMenuItem("載入未封裝的擴充功能…", async () => await LoadUnpackedWithDialogAsync()));
+        if (Settings.DevMode)
+        {
+            menu.Items.Add(MakeMenuItem("全部重新載入", async () => { if (Extensions != null) { await Extensions.ReloadAllAsync(); } }, "Ctrl+Shift+R"));
+        }
+        menu.Items.Add(MakeMenuItem("管理擴充功能", () => OpenExtensionsTab(), "Ctrl+Shift+E"));
+        menu.IsOpen = true;
+    }
+
+    public async Task LoadUnpackedWithDialogAsync()
+    {
+        if (Extensions == null)
+        {
+            ShowError("擴充功能系統尚未就緒。");
+            return;
+        }
+        var dlg = new Microsoft.Win32.OpenFolderDialog
+        {
+            Title = "選擇擴充功能資料夾（含 manifest.json）",
+            Multiselect = false,
+        };
+        if (dlg.ShowDialog(this) != true)
+        {
+            return;
+        }
+        try
+        {
+            await Extensions.LoadUnpackedAsync(dlg.FolderName);
+        }
+        catch (Exception ex)
+        {
+            ShowError(ex.Message);
+        }
+    }
+
+    // ======================= 主選單 =======================
+
+    private void MainMenu_Click(object sender, RoutedEventArgs e)
+    {
+        var menu = new ContextMenu { PlacementTarget = (UIElement)sender, Placement = PlacementMode.Bottom };
+        menu.Items.Add(MakeMenuItem("新增分頁", () => _ = CreateTabSafeAsync(Settings.HomePage, null), "Ctrl+T"));
+        menu.Items.Add(MakeMenuItem("擴充功能管理", () => OpenExtensionsTab(), "Ctrl+Shift+E"));
+        menu.Items.Add(new Separator());
+        menu.Items.Add(MakeToggleItem("開發人員模式", Settings.DevMode, v =>
+        {
+            Settings.DevMode = v;
+            ApplyDevMode();
+            (_tabs.OfType<ExtensionsTab>().FirstOrDefault())?.OnActivated();
+        }));
+        menu.Items.Add(MakeToggleItem("監看擴充功能資料夾", Settings.WatchExtensionFolders, v =>
+        {
+            Settings.WatchExtensionFolders = v;
+            Extensions?.UpdateWatchers();
+        }));
+        menu.Items.Add(MakeToggleItem("重載擴充功能後重新整理分頁", Settings.ReloadTabAfterExtensionReload, v => Settings.ReloadTabAfterExtensionReload = v));
+        menu.Items.Add(MakeToggleItem("啟動時還原分頁", Settings.RestoreSession, v => Settings.RestoreSession = v));
+        menu.Items.Add(MakeMenuItem("將目前頁面設為首頁", () =>
+        {
+            if (SelectedTab is WebTab w && !string.IsNullOrEmpty(w.Url))
+            {
+                Settings.HomePage = w.Url;
+                Settings.Save();
+            }
+        }));
+        menu.Items.Add(new Separator());
+        menu.Items.Add(MakeMenuItem("開啟資料資料夾", () => StartShell("explorer.exe", $"\"{AppPaths.Root}\"")));
+        menu.Items.Add(MakeMenuItem("編輯 settings.json", () =>
+        {
+            Settings.Save();
+            StartShell("notepad.exe", $"\"{AppPaths.SettingsFile}\"");
+        }));
+        menu.Items.Add(new Separator());
+        menu.Items.Add(MakeMenuItem("關於 ExtHost", ShowAbout));
+        menu.IsOpen = true;
+    }
+
+    private void ShowAbout()
+    {
+        var ver = typeof(App).Assembly.GetName().Version?.ToString(3) ?? "";
+        MessageBox.Show(this,
+            $"ExtHost {ver}\n\n以 WebView2 為核心的瀏覽器，可載入自製擴充功能。\n\n" +
+            $"WebView2 Runtime：{_env?.BrowserVersionString}\n資料位置：{AppPaths.Root}",
+            "關於 ExtHost", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    private MenuItem MakeMenuItem(string header, Action onClick, string? gesture = null)
+    {
+        var mi = new MenuItem { Header = header, InputGestureText = gesture ?? "" };
+        mi.Click += (_, _) => onClick();
+        return mi;
+    }
+
+    private MenuItem MakeMenuItem(string header, Func<Task> onClick, string? gesture = null)
+    {
+        var mi = new MenuItem { Header = header, InputGestureText = gesture ?? "" };
+        mi.Click += async (_, _) =>
+        {
+            try
+            {
+                await onClick();
+            }
+            catch (Exception ex)
+            {
+                ShowError(ex.Message);
+            }
+        };
+        return mi;
+    }
+
+    private MenuItem MakeToggleItem(string header, bool isChecked, Action<bool> onChange)
+    {
+        var mi = new MenuItem { Header = header, IsCheckable = true, IsChecked = isChecked };
+        mi.Click += (_, _) =>
+        {
+            onChange(mi.IsChecked);
+            Settings.Save();
+        };
+        return mi;
+    }
+
+    private static void StartShell(string file, string args)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(file, args) { UseShellExecute = true });
+        }
+        catch
+        {
+        }
+    }
+
+    public void ShowError(string message)
+    {
+        MessageBox.Show(this, message, "ExtHost", MessageBoxButton.OK, MessageBoxImage.Warning);
+    }
+
+    // ======================= 鍵盤快捷鍵 =======================
+
+    private void OnPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        var mods = Keyboard.Modifiers;
+        var ctrl = mods.HasFlag(ModifierKeys.Control);
+        var shift = mods.HasFlag(ModifierKeys.Shift);
+        var alt = mods.HasFlag(ModifierKeys.Alt);
+        var handled = true;
+
+        if (ctrl && !shift && !alt && key == Key.T)
+        {
+            _ = CreateTabSafeAsync(Settings.HomePage, null);
+        }
+        else if (ctrl && !alt && (key == Key.W || key == Key.F4))
+        {
+            if (SelectedTab != null)
+            {
+                CloseTab(SelectedTab);
+            }
+        }
+        else if (ctrl && key == Key.Tab)
+        {
+            SelectTabByOffset(shift ? -1 : 1);
+        }
+        else if (ctrl && !shift && key == Key.PageDown)
+        {
+            SelectTabByOffset(1);
+        }
+        else if (ctrl && !shift && key == Key.PageUp)
+        {
+            SelectTabByOffset(-1);
+        }
+        else if ((ctrl && !shift && key == Key.L) || (alt && !ctrl && key == Key.D) || (mods == ModifierKeys.None && key == Key.F6))
+        {
+            FocusAddressBar();
+        }
+        else if ((mods == ModifierKeys.None && key == Key.F5) || (ctrl && !shift && key == Key.R))
+        {
+            if (SelectedTab is WebTab w)
+            {
+                w.Reload();
+            }
+            else
+            {
+                ReloadCurrent();
+            }
+        }
+        else if (ctrl && shift && key == Key.R)
+        {
+            if (Extensions != null)
+            {
+                _ = Extensions.ReloadAllAsync();
+            }
+        }
+        else if (ctrl && shift && key == Key.E)
+        {
+            OpenExtensionsTab();
+        }
+        else if ((mods == ModifierKeys.None && key == Key.F12) || (ctrl && shift && key == Key.I))
+        {
+            (SelectedTab as WebTab)?.OpenDevTools();
+        }
+        else if (alt && !ctrl && key == Key.Left)
+        {
+            (SelectedTab as WebTab)?.GoBack();
+        }
+        else if (alt && !ctrl && key == Key.Right)
+        {
+            (SelectedTab as WebTab)?.GoForward();
+        }
+        else if (alt && !ctrl && key == Key.Home)
+        {
+            if (SelectedTab is WebTab w)
+            {
+                w.Navigate(UrlHelper.IsBlank(Settings.HomePage) ? "about:blank" : Settings.HomePage);
+            }
+        }
+        else if (ctrl && !shift && !alt && key >= Key.D1 && key <= Key.D9)
+        {
+            if (_tabs.Count > 0)
+            {
+                var n = key - Key.D1;
+                TabList.SelectedItem = key == Key.D9 ? _tabs[^1] : _tabs[Math.Min(n, _tabs.Count - 1)];
+            }
+        }
+        else if (_isFullScreen && mods == ModifierKeys.None && key == Key.F11)
+        {
+            SetFullScreen(false);
+        }
+        else
+        {
+            handled = false;
+        }
+
+        if (handled)
+        {
+            e.Handled = true;
+        }
+    }
+
+    // ======================= 視窗 =======================
+
+    private void Minimize_Click(object sender, RoutedEventArgs e) => SystemCommands.MinimizeWindow(this);
+
+    private void Maximize_Click(object sender, RoutedEventArgs e)
+    {
+        if (WindowState == WindowState.Maximized)
+        {
+            SystemCommands.RestoreWindow(this);
+        }
+        else
+        {
+            SystemCommands.MaximizeWindow(this);
+        }
+    }
+
+    private void CloseWindow_Click(object sender, RoutedEventArgs e) => Close();
+
+    [DllImport("user32.dll")]
+    private static extern int GetSystemMetricsForDpi(int nIndex, uint dpi);
+
+    private void UpdateMaximizeState()
+    {
+        if (WindowState == WindowState.Maximized)
+        {
+            // WindowChrome 最大化時視窗邊框會超出螢幕，需補回邊距
+            double frame = 8;
+            try
+            {
+                var dpi = VisualTreeHelper.GetDpi(this);
+                var d = (uint)Math.Round(dpi.PixelsPerInchX);
+                var px = GetSystemMetricsForDpi(32 /* SM_CXSIZEFRAME */, d) + GetSystemMetricsForDpi(92 /* SM_CXPADDEDBORDER */, d);
+                if (px > 0)
+                {
+                    frame = px / dpi.DpiScaleX;
+                }
+            }
+            catch
+            {
+            }
+            RootBorder.Margin = new Thickness(frame);
+            RootBorder.BorderThickness = new Thickness(0);
+            MaxButton.Content = "";
+            MaxButton.ToolTip = "還原";
+        }
+        else
+        {
+            RootBorder.Margin = new Thickness(0);
+            RootBorder.BorderThickness = new Thickness(1);
+            MaxButton.Content = "";
+            MaxButton.ToolTip = "最大化";
+        }
+    }
+
+    private void SetFullScreen(bool full)
+    {
+        if (full == _isFullScreen)
+        {
+            return;
+        }
+        _isFullScreen = full;
+        if (full)
+        {
+            _stateBeforeFullScreen = WindowState;
+            TabStripRowDef.Height = new GridLength(0);
+            ToolbarRowDef.Height = new GridLength(0);
+            StatusRowDef.Height = new GridLength(0);
+            WindowChrome.SetWindowChrome(this, new WindowChrome
+            {
+                CaptionHeight = 0,
+                ResizeBorderThickness = new Thickness(0),
+                GlassFrameThickness = new Thickness(0),
+                UseAeroCaptionButtons = false,
+            });
+            WindowState = WindowState.Maximized;
+        }
+        else
+        {
+            TabStripRowDef.Height = new GridLength(44);
+            ToolbarRowDef.Height = new GridLength(48);
+            StatusRowDef.Height = new GridLength(26);
+            WindowChrome.SetWindowChrome(this, new WindowChrome
+            {
+                CaptionHeight = 44,
+                ResizeBorderThickness = new Thickness(6),
+                GlassFrameThickness = new Thickness(0),
+                CornerRadius = new CornerRadius(0),
+                UseAeroCaptionButtons = false,
+            });
+            WindowState = _stateBeforeFullScreen;
+        }
+        UpdateMaximizeState();
+    }
+
+    private void RestorePlacement()
+    {
+        Width = Math.Max(MinWidth, Settings.WindowWidth);
+        Height = Math.Max(MinHeight, Settings.WindowHeight);
+        if (Settings.WindowLeft is { } left && Settings.WindowTop is { } top)
+        {
+            var vl = SystemParameters.VirtualScreenLeft;
+            var vt = SystemParameters.VirtualScreenTop;
+            var vw = SystemParameters.VirtualScreenWidth;
+            var vh = SystemParameters.VirtualScreenHeight;
+            if (left >= vl - 50 && top >= vt - 10 && left + 100 <= vl + vw && top + 50 <= vt + vh)
+            {
+                WindowStartupLocation = WindowStartupLocation.Manual;
+                Left = left;
+                Top = top;
+                return;
+            }
+        }
+        WindowStartupLocation = WindowStartupLocation.CenterScreen;
+    }
+
+    private void OnClosing(object? sender, CancelEventArgs e)
+    {
+        _isClosing = true;
+
+        // 儲存分頁
+        Settings.LastSession = _tabs
+            .Select(t => t is ExtensionsTab ? UrlHelper.ExtensionsPageUrl : t.Url)
+            .Where(u => !UrlHelper.IsBlank(u))
+            .ToList();
+
+        // 儲存視窗位置
+        var bounds = WindowState == WindowState.Normal ? new Rect(Left, Top, Width, Height) : RestoreBounds;
+        if (!bounds.IsEmpty && !_isFullScreen)
+        {
+            Settings.WindowLeft = bounds.Left;
+            Settings.WindowTop = bounds.Top;
+            Settings.WindowWidth = bounds.Width;
+            Settings.WindowHeight = bounds.Height;
+        }
+        Settings.WindowMaximized = WindowState == WindowState.Maximized && !_isFullScreen;
+        Settings.Save();
+
+        ExtensionPopupWindow.Current?.Close();
+        Extensions?.Shutdown();
+
+        foreach (var t in _tabs.ToList())
+        {
+            t.Close();
+        }
+    }
+}

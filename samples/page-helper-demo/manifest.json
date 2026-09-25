@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "ExtHost 範例：頁面小幫手",
+  "version": "0.1.0",
+  "description": "驗證 content script、storage、runtime 訊息、popup 與選項頁在 ExtHost 中能正常運作",
+  "icons": {
+    "16": "icons/16.png",
+    "32": "icons/32.png",
+    "48": "icons/48.png",
+    "128": "icons/128.png"
+  },
+  "action": {
+    "default_title": "頁面小幫手",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/16.png",
+      "32": "icons/32.png"
+    }
+  },
+  "options_page": "options.html",
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": ["storage"],
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
