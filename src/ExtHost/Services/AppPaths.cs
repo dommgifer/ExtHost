@@ -24,6 +24,11 @@ public static class AppPaths
 
     public static string LogFile => Path.Combine(Root, "exthost.log");
 
+    public static string BookmarksFile => Path.Combine(Root, "Bookmarks.json");
+
+    /// <summary>網站圖示快取（書籤列使用）。</summary>
+    public static string FaviconsDir => Path.Combine(Root, "Favicons");
+
     public static void EnsureCreated()
     {
         Directory.CreateDirectory(Root);

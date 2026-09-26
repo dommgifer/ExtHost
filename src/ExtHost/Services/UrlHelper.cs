@@ -24,6 +24,25 @@ public static class UrlHelper
             return null;
         }
 
+        var url = FixupUrl(text);
+        if (url != null)
+        {
+            return url;
+        }
+
+        var template = string.IsNullOrWhiteSpace(searchUrl) ? "https://www.google.com/search?q={0}" : searchUrl;
+        return template.Replace("{0}", Uri.EscapeDataString(text));
+    }
+
+    /// <summary>把輸入整理成網址（例如 google.com → https://google.com）；看起來不像網址則回傳 null。</summary>
+    public static string? FixupUrl(string input)
+    {
+        var text = input.Trim();
+        if (text.Length == 0)
+        {
+            return null;
+        }
+
         if (text.Contains("://", StringComparison.Ordinal))
         {
             return text;
@@ -46,7 +65,7 @@ public static class UrlHelper
             }
             catch
             {
-                // 當成搜尋
+                // 不是網址
             }
         }
 
@@ -75,8 +94,7 @@ public static class UrlHelper
             }
         }
 
-        var template = string.IsNullOrWhiteSpace(searchUrl) ? "https://www.google.com/search?q={0}" : searchUrl;
-        return template.Replace("{0}", Uri.EscapeDataString(text));
+        return null;
     }
 
     public static bool IsSecure(string? url) =>
