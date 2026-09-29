@@ -21,12 +21,6 @@ public sealed class ChromeBookmarkFile
         return FromDocument(doc);
     }
 
-    public static ChromeBookmarkFile ReadJson(string json)
-    {
-        using var doc = JsonDocument.Parse(json, JsonOptions);
-        return FromDocument(doc);
-    }
-
     private static readonly JsonDocumentOptions JsonOptions = new() { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip };
 
     private static ChromeBookmarkFile FromDocument(JsonDocument doc)

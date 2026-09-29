@@ -369,29 +369,50 @@ public sealed class BookmarkStore
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
-    /// <summary>上次成功儲存（或載入）時的內容，存檔失敗時用來還原。</summary>
-    private string _lastSavedJson = "";
+    /// <summary>上次成功儲存（或載入）時每個節點的狀態，存檔失敗時用來還原。</summary>
+    private sealed record NodeState(BookmarkNode? Parent, BookmarkNode[] Children, string Name, string? Url, long DateAdded);
+
+    private Dictionary<BookmarkNode, NodeState> _lastSaved = new();
+
+    private void TakeSnapshot()
+    {
+        var snap = new Dictionary<BookmarkNode, NodeState>();
+        foreach (var n in Roots.Concat(AllNodes()))
+        {
+            snap[n] = new NodeState(n.Parent, n.Children.ToArray(), n.Name, n.Url, n.DateAdded);
+        }
+        _lastSaved = snap;
+    }
 
     /// <summary>
     /// 啟動時讀取書籤檔失敗的原因；不為 null 時停止寫入書籤檔，避免用空白內容覆寫原本的書籤。
     /// </summary>
     public string? LoadError { get; private set; }
 
+    /// <summary>
+    /// 把書籤樹還原成上次成功儲存的狀態，並保留原本的物件（畫面上拿著的資料夾、書籤參照仍然有效）。
+    /// 上次儲存後才新增的節點會脫離書籤樹（Parent 設為 null），<see cref="IsAttached"/> 會回傳 false。
+    /// </summary>
     private void RestoreFromLastSaved()
     {
-        BookmarkBar.Children.Clear();
-        Other.Children.Clear();
+        var current = Roots.Concat(AllNodes()).ToList();
+        foreach (var (node, state) in _lastSaved)
+        {
+            node.Parent = state.Parent;
+            node.Name = state.Name;
+            node.Url = state.Url;
+            node.DateAdded = state.DateAdded;
+            node.Children.Clear();
+            node.Children.AddRange(state.Children);
+        }
+        foreach (var n in current)
+        {
+            if (!_lastSaved.ContainsKey(n))
+            {
+                n.Parent = null;
+            }
+        }
         _undo.Clear();
-        try
-        {
-            var file = ChromeBookmarkFile.ReadJson(_lastSavedJson);
-            LoadRoot(BookmarkBar, file.BookmarkBar);
-            LoadRoot(Other, file.Other);
-        }
-        catch (Exception ex)
-        {
-            AppPaths.Log("還原書籤失敗：" + ex.Message);
-        }
     }
 
     // ======================= 讀寫檔案 =======================
@@ -422,7 +443,7 @@ public sealed class BookmarkStore
             }
             store.LoadError = ex.Message + "\n\n書籤檔：" + AppPaths.BookmarksFile + "\n" + backupNote;
         }
-        store._lastSavedJson = store.Serialize();
+        store.TakeSnapshot();
         return store;
     }
 
@@ -479,7 +500,7 @@ public sealed class BookmarkStore
         var tmp = AppPaths.BookmarksFile + ".tmp";
         File.WriteAllText(tmp, json, new UTF8Encoding(false));
         File.Move(tmp, AppPaths.BookmarksFile, true);
-        _lastSavedJson = json;
+        TakeSnapshot();
     }
 
     private string Serialize()
