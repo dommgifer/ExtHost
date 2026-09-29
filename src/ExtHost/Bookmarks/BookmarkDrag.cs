@@ -139,13 +139,11 @@ public static class BookmarkDrag
         var nodes = GetNodes(data, store);
         if (nodes != null)
         {
-            store.MoveMany(nodes, parent, index);
-            return true;
+            return BookmarkUi.TrySave(() => store.MoveMany(nodes, parent, index));
         }
         if (GetPage(data) is { } page)
         {
-            store.AddUrl(parent, index, page.Title, page.Url);
-            return true;
+            return BookmarkUi.TrySave(() => store.AddUrl(parent, index, page.Title, page.Url));
         }
         return false;
     }

@@ -54,6 +54,20 @@ public partial class App : Application
 
     private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
+        // 書籤存檔失敗（修改已還原）：顯示原因即可，不是程式錯誤
+        if (e.Exception is BookmarkSaveException bse)
+        {
+            if (MainWindow is { IsVisible: true } owner)
+            {
+                MessageBox.Show(owner, bse.Message, "書籤", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+            else
+            {
+                MessageBox.Show(bse.Message, "書籤", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+            e.Handled = true;
+            return;
+        }
         AppPaths.Log("UI 例外：" + e.Exception);
         MessageBox.Show("發生未預期的錯誤：\n" + e.Exception.Message + "\n\n詳細內容已寫入：" + AppPaths.LogFile,
             "ExtHost", MessageBoxButton.OK, MessageBoxImage.Error);

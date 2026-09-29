@@ -274,6 +274,41 @@ public static class BookmarkUi
         menu.IsOpen = true;
     }
 
+    /// <summary>
+    /// 執行會修改書籤的動作；存檔失敗時（修改已被還原）顯示錯誤並回傳 false。
+    /// </summary>
+    public static bool TrySave(Action action)
+    {
+        try
+        {
+            action();
+            return true;
+        }
+        catch (BookmarkSaveException ex)
+        {
+            ShowSaveError(ex);
+            return false;
+        }
+    }
+
+    /// <summary>顯示「書籤沒有儲存」的錯誤（延後顯示，避免在拖放或關閉視窗的過程中開對話框）。</summary>
+    public static void ShowSaveError(BookmarkSaveException ex)
+    {
+        var app = Application.Current;
+        app?.Dispatcher.BeginInvoke(() =>
+        {
+            var owner = app.MainWindow;
+            if (owner != null && owner.IsVisible)
+            {
+                MessageBox.Show(owner, ex.Message, "書籤", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+            else
+            {
+                MessageBox.Show(ex.Message, "書籤", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        });
+    }
+
     /// <summary>「匯出書籤」：選擇存放位置後匯出成 HTML。</summary>
     public static void ExportWithDialog(IBookmarkHost host)
     {

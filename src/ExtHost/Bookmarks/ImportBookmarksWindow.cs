@@ -301,7 +301,15 @@ public sealed class ImportBookmarksWindow : Window
 
         var urls = data.UrlCount;
         var folders = data.FolderCount;
-        BookmarkImporter.ImportInto(_host.Bookmarks, data);
+        try
+        {
+            BookmarkImporter.ImportInto(_host.Bookmarks, data);
+        }
+        catch (BookmarkSaveException ex)
+        {
+            MessageBox.Show(this, ex.Message, "匯入書籤", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
 
         var from = data.SourceName.Length > 0 ? $"從 {data.SourceName} " : "";
         _doneText.Text = folders > 0

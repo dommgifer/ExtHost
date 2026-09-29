@@ -17,7 +17,20 @@ public sealed class ChromeBookmarkFile
     {
         // Chrome 執行中也能讀（Chrome 不會獨佔這個檔案）
         using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-        using var doc = JsonDocument.Parse(fs, new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip });
+        using var doc = JsonDocument.Parse(fs, JsonOptions);
+        return FromDocument(doc);
+    }
+
+    public static ChromeBookmarkFile ReadJson(string json)
+    {
+        using var doc = JsonDocument.Parse(json, JsonOptions);
+        return FromDocument(doc);
+    }
+
+    private static readonly JsonDocumentOptions JsonOptions = new() { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip };
+
+    private static ChromeBookmarkFile FromDocument(JsonDocument doc)
+    {
         var result = new ChromeBookmarkFile();
         if (doc.RootElement.TryGetProperty("roots", out var roots) && roots.ValueKind == JsonValueKind.Object)
         {

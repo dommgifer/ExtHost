@@ -192,7 +192,9 @@ public sealed class BookmarkBubble : Window
 
     // ======================= 動作 =======================
 
-    private void Apply()
+    private void Apply() => BookmarkUi.TrySave(ApplyCore);
+
+    private void ApplyCore()
     {
         if (_node.Parent == null)
         {
@@ -218,10 +220,7 @@ public sealed class BookmarkBubble : Window
     {
         _applyOnClose = false;
         // 與 Chrome 相同：移除這個網址的所有書籤
-        foreach (var n in _host.Bookmarks.FindAllByUrl(_node.Url!))
-        {
-            _host.Bookmarks.Remove(n);
-        }
+        BookmarkUi.TrySave(() => _host.Bookmarks.RemoveMany(_host.Bookmarks.FindAllByUrl(_node.Url!)));
         Close();
     }
 

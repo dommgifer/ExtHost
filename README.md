@@ -104,6 +104,8 @@ ExtHost 的書籤是獨立的，不會修改 Chrome 或 Edge 的資料。要把 
 
 **書籤 HTML 檔**：Chrome、Edge、Firefox 的「匯出書籤」產生的 `.html` 檔也可以匯入，適合從別台電腦搬書籤。
 
+**書籤檔損壞時**：啟動時如果 `Bookmarks.json` 讀取失敗，ExtHost 會先備份成 `Bookmarks.json.broken-日期時間`，並停止寫入書籤（避免空白內容覆寫原檔），同時提示復原方式。儲存書籤失敗時（例如磁碟空間不足），這次的修改會還原並顯示錯誤，不會出現「畫面上有、重開就不見」的情況。
+
 Chrome 開著的時候也可以匯入。新版 Chrome 登入帳號後，部分書籤會存在 `Account Bookmarks` 檔，ExtHost 會和 `Bookmarks` 一起匯入。
 
 ## 快捷鍵

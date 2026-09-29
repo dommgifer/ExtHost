@@ -77,6 +77,21 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
         }
 
         RuntimeText.Text = "WebView2 " + _env.BrowserVersionString;
+
+        if (Bookmarks.LoadError != null)
+        {
+            // 書籤檔讀不到：已停止寫入，提醒使用者如何復原
+            var answer = MessageBox.Show(this,
+                "無法讀取書籤檔。為避免覆寫原本的書籤，ExtHost 已停止儲存書籤，這段期間無法新增或修改書籤。\n\n"
+                + "原因：" + Bookmarks.LoadError + "\n\n"
+                + "復原方式：關閉 ExtHost，修復 Bookmarks.json（或用備份檔取代它；若不需要舊書籤也可以直接刪除），再重新啟動。\n\n"
+                + "要開啟資料資料夾嗎？",
+                "書籤", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (answer == MessageBoxResult.Yes)
+            {
+                StartShell("explorer.exe", $"/select,\"{AppPaths.BookmarksFile}\"");
+            }
+        }
         ProfileText.Text = AppPaths.IsPortable ? "可攜模式" : "";
 
         WebTab first;

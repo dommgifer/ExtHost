@@ -5,6 +5,14 @@ using System.Text.Json;
 
 namespace ExtHost.Services;
 
+/// <summary>書籤無法寫入磁碟；這次的修改已經還原。</summary>
+public sealed class BookmarkSaveException : Exception
+{
+    public BookmarkSaveException(string message, Exception? inner = null) : base(message, inner)
+    {
+    }
+}
+
 /// <summary>一個書籤或資料夾。</summary>
 public sealed class BookmarkNode
 {
@@ -335,11 +343,55 @@ public sealed class BookmarkStore
         }
     }
 
-    /// <summary>儲存並通知變更（AddTree 之後要呼叫）。</summary>
+    /// <summary>
+    /// 儲存並通知變更（AddTree 之後要呼叫）。
+    /// 存檔失敗時會把記憶體中的書籤還原成上次成功儲存的狀態，並擲出 <see cref="BookmarkSaveException"/>，
+    /// 畫面不會顯示沒有保存的修改。
+    /// </summary>
     public void Commit()
     {
-        Save();
+        try
+        {
+            Save();
+        }
+        catch (Exception ex)
+        {
+            AppPaths.Log("儲存書籤失敗：" + ex);
+            RestoreFromLastSaved();
+            Changed?.Invoke(this, EventArgs.Empty);
+            throw new BookmarkSaveException(
+                LoadError != null
+                    ? "書籤檔讀取失敗，為避免覆寫原本的書籤，目前無法修改書籤。這次的修改已取消。\n\n"
+                      + "請修復或移除下列檔案後重新啟動 ExtHost：\n" + AppPaths.BookmarksFile
+                    : "無法儲存書籤，這次的修改已取消。\n\n" + ex.Message + "\n\n書籤檔：" + AppPaths.BookmarksFile,
+                ex);
+        }
         Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>上次成功儲存（或載入）時的內容，存檔失敗時用來還原。</summary>
+    private string _lastSavedJson = "";
+
+    /// <summary>
+    /// 啟動時讀取書籤檔失敗的原因；不為 null 時停止寫入書籤檔，避免用空白內容覆寫原本的書籤。
+    /// </summary>
+    public string? LoadError { get; private set; }
+
+    private void RestoreFromLastSaved()
+    {
+        BookmarkBar.Children.Clear();
+        Other.Children.Clear();
+        _undo.Clear();
+        try
+        {
+            var file = ChromeBookmarkFile.ReadJson(_lastSavedJson);
+            LoadRoot(BookmarkBar, file.BookmarkBar);
+            LoadRoot(Other, file.Other);
+        }
+        catch (Exception ex)
+        {
+            AppPaths.Log("還原書籤失敗：" + ex.Message);
+        }
     }
 
     // ======================= 讀寫檔案 =======================
@@ -349,38 +401,53 @@ public sealed class BookmarkStore
         var store = new BookmarkStore();
         try
         {
-            if (File.Exists(AppPaths.BookmarksFile))
-            {
-                var file = ChromeBookmarkFile.Read(AppPaths.BookmarksFile);
-                store.LoadRoot(store.BookmarkBar, file.BookmarkBar);
-                store.LoadRoot(store.Other, file.Other);
-                var maxId = store.AllNodes().Select(n => n.Id).DefaultIfEmpty(2).Max();
-                store._nextId = Math.Max(3, maxId + 1);
-
-                // 修正重複或無效的 id
-                var seen = new HashSet<long> { 1, 2 };
-                foreach (var n in store.AllNodes())
-                {
-                    if (n.Id <= 0 || !seen.Add(n.Id))
-                    {
-                        n.Id = store._nextId++;
-                        seen.Add(n.Id);
-                    }
-                }
-            }
+            store.LoadFromDisk();
         }
         catch (Exception ex)
         {
-            AppPaths.Log("讀取書籤失敗：" + ex.Message);
+            // 不要回傳一份會被存回去的空白書籤：記下錯誤、停止寫入，並保留一份備份
+            AppPaths.Log("讀取書籤失敗：" + ex);
+            store.BookmarkBar.Children.Clear();
+            store.Other.Children.Clear();
+            var backup = AppPaths.BookmarksFile + ".broken-" + DateTime.Now.ToString("yyyyMMdd-HHmmss");
+            string backupNote;
             try
             {
-                File.Copy(AppPaths.BookmarksFile, AppPaths.BookmarksFile + ".broken", true);
+                File.Copy(AppPaths.BookmarksFile, backup, false);
+                backupNote = "已備份到：" + backup;
             }
-            catch
+            catch (Exception copyEx)
             {
+                backupNote = "無法建立備份（" + copyEx.Message + "），請先自行複製這個檔案。";
+            }
+            store.LoadError = ex.Message + "\n\n書籤檔：" + AppPaths.BookmarksFile + "\n" + backupNote;
+        }
+        store._lastSavedJson = store.Serialize();
+        return store;
+    }
+
+    private void LoadFromDisk()
+    {
+        if (!File.Exists(AppPaths.BookmarksFile))
+        {
+            return;
+        }
+        var file = ChromeBookmarkFile.Read(AppPaths.BookmarksFile);
+        LoadRoot(BookmarkBar, file.BookmarkBar);
+        LoadRoot(Other, file.Other);
+        var maxId = AllNodes().Select(n => n.Id).DefaultIfEmpty(2).Max();
+        _nextId = Math.Max(3, maxId + 1);
+
+        // 修正重複或無效的 id
+        var seen = new HashSet<long> { 1, 2 };
+        foreach (var n in AllNodes())
+        {
+            if (n.Id <= 0 || !seen.Add(n.Id))
+            {
+                n.Id = _nextId++;
+                seen.Add(n.Id);
             }
         }
-        return store;
     }
 
     private void LoadRoot(BookmarkNode root, BookmarkNode? loaded)
@@ -400,19 +467,19 @@ public sealed class BookmarkStore
         }
     }
 
-    public void Save()
+    /// <summary>寫入書籤檔；失敗時擲出例外（由 <see cref="Commit"/> 處理）。</summary>
+    private void Save()
     {
-        try
+        if (LoadError != null)
         {
-            AppPaths.EnsureCreated();
-            var tmp = AppPaths.BookmarksFile + ".tmp";
-            File.WriteAllText(tmp, Serialize(), new UTF8Encoding(false));
-            File.Move(tmp, AppPaths.BookmarksFile, true);
+            throw new InvalidOperationException("書籤檔讀取失敗，停止寫入以保護原本的書籤。");
         }
-        catch (Exception ex)
-        {
-            AppPaths.Log("儲存書籤失敗：" + ex.Message);
-        }
+        var json = Serialize();
+        AppPaths.EnsureCreated();
+        var tmp = AppPaths.BookmarksFile + ".tmp";
+        File.WriteAllText(tmp, json, new UTF8Encoding(false));
+        File.Move(tmp, AppPaths.BookmarksFile, true);
+        _lastSavedJson = json;
     }
 
     private string Serialize()
