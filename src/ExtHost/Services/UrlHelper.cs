@@ -7,6 +7,8 @@ public static class UrlHelper
 {
     public const string ExtensionsPageUrl = "exthost://extensions";
 
+    public const string BookmarksPageUrl = "exthost://bookmarks";
+
     private static readonly string[] PassThroughPrefixes =
     {
         "about:", "data:", "edge:", "chrome:", "view-source:", "blob:", "javascript:", "mailto:",

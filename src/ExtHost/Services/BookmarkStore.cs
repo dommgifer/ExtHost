@@ -161,24 +161,127 @@ public sealed class BookmarkStore
         Commit();
     }
 
-    public void Remove(BookmarkNode node)
+    private sealed record RemovedEntry(BookmarkNode Node, BookmarkNode Parent, int Index);
+
+    /// <summary>刪除紀錄（每次刪除一組），供「復原」使用。</summary>
+    private readonly Stack<List<RemovedEntry>> _undo = new();
+
+    public bool CanUndo => _undo.Count > 0;
+
+    public void Remove(BookmarkNode node) => RemoveMany(new[] { node });
+
+    /// <summary>刪除多個項目（算一次動作，復原時一起還原）。已被一併刪除的子項目會略過。</summary>
+    public void RemoveMany(IEnumerable<BookmarkNode> nodes)
     {
-        if (node.IsRoot)
+        var list = nodes.Where(n => !n.IsRoot && n.Parent != null).Distinct().ToList();
+        list = list.Where(n => !list.Any(other => other != n && n.IsDescendantOf(other))).ToList();
+        if (list.Count == 0)
         {
             return;
         }
-        node.Parent!.Children.Remove(node);
-        node.Parent = null;
+        var group = new List<RemovedEntry>();
+        foreach (var n in list)
+        {
+            var parent = n.Parent!;
+            group.Add(new RemovedEntry(n, parent, parent.Children.IndexOf(n)));
+            parent.Children.Remove(n);
+            n.Parent = null;
+        }
+        _undo.Push(group);
+        while (_undo.Count > 50)
+        {
+            // Stack 沒有移除最底層的方法，重建一次
+            var keep = _undo.Take(50).Reverse().ToList();
+            _undo.Clear();
+            foreach (var g in keep)
+            {
+                _undo.Push(g);
+            }
+        }
         Commit();
+    }
+
+    /// <summary>復原最近一次刪除；回傳還原的項目。</summary>
+    public IReadOnlyList<BookmarkNode> UndoRemove()
+    {
+        if (_undo.Count == 0)
+        {
+            return Array.Empty<BookmarkNode>();
+        }
+        var group = _undo.Pop();
+        // 依刪除的相反順序放回原位置
+        for (var i = group.Count - 1; i >= 0; i--)
+        {
+            var e = group[i];
+            if (!IsAttached(e.Parent))
+            {
+                continue; // 原本的資料夾也已經被刪除
+            }
+            e.Node.Parent = e.Parent;
+            e.Parent.Children.Insert(Math.Clamp(e.Index, 0, e.Parent.Children.Count), e.Node);
+        }
+        Commit();
+        return group.Select(e => e.Node).ToList();
     }
 
     /// <summary>移到指定資料夾的 index 位置（index &lt; 0 表示最後面）。</summary>
     public void Move(BookmarkNode node, BookmarkNode newParent, int index)
     {
-        if (node.IsRoot || node == newParent || newParent.IsDescendantOf(node) || !newParent.IsFolder)
+        if (!CanMove(node, newParent))
         {
             return;
         }
+        MoveCore(node, newParent, index);
+        Commit();
+    }
+
+    /// <summary>
+    /// 把多個項目依序移到指定位置（拖曳多個項目時使用），只存檔一次。
+    /// index &lt; 0 表示最後面；index 指的是移動前 newParent 裡的位置。
+    /// </summary>
+    public void MoveMany(IReadOnlyList<BookmarkNode> nodes, BookmarkNode newParent, int index)
+    {
+        var list = nodes.Where(n => CanMove(n, newParent)).ToList();
+        list = list.Where(n => !list.Any(other => other != n && n.IsDescendantOf(other))).ToList();
+        if (list.Count == 0)
+        {
+            return;
+        }
+        // 先找出插入點後面的「錨點」，移動完再依錨點決定位置，避免 index 因移除而偏移
+        BookmarkNode? anchor = null;
+        if (index >= 0)
+        {
+            anchor = newParent.Children.Skip(index).FirstOrDefault(c => !list.Contains(c));
+        }
+        foreach (var n in list)
+        {
+            n.Parent!.Children.Remove(n);
+        }
+        var at = anchor != null ? newParent.Children.IndexOf(anchor) : newParent.Children.Count;
+        foreach (var n in list)
+        {
+            n.Parent = newParent;
+            newParent.Children.Insert(at++, n);
+        }
+        Commit();
+    }
+
+    /// <summary>節點是否還在書籤樹裡（沒有被刪除）。</summary>
+    public bool IsAttached(BookmarkNode node)
+    {
+        var n = node;
+        while (n.Parent != null)
+        {
+            n = n.Parent;
+        }
+        return n == BookmarkBar || n == Other;
+    }
+
+    public static bool CanMove(BookmarkNode node, BookmarkNode newParent) =>
+        !node.IsRoot && node.Parent != null && node != newParent && !newParent.IsDescendantOf(node) && newParent.IsFolder;
+
+    private static void MoveCore(BookmarkNode node, BookmarkNode newParent, int index)
+    {
         var old = node.Parent!;
         var oldIndex = old.Children.IndexOf(node);
         old.Children.RemoveAt(oldIndex);
@@ -192,6 +295,17 @@ public sealed class BookmarkStore
         }
         node.Parent = newParent;
         newParent.Children.Insert(Math.Clamp(index, 0, newParent.Children.Count), node);
+    }
+
+    /// <summary>資料夾內依名稱排序（資料夾在前）。</summary>
+    public void SortByName(BookmarkNode folder)
+    {
+        var sorted = folder.Children
+            .OrderBy(c => c.IsFolder ? 0 : 1)
+            .ThenBy(c => c.DisplayName, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+        folder.Children.Clear();
+        folder.Children.AddRange(sorted);
         Commit();
     }
 

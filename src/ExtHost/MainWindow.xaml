@@ -63,7 +63,9 @@
                         <ListBox.ItemTemplate>
                             <DataTemplate>
                                 <Grid Height="38" Background="Transparent" ToolTip="{Binding Title}"
-                                      MouseDown="TabItem_MouseDown">
+                                      MouseDown="TabItem_MouseDown"
+                                      PreviewMouseLeftButtonDown="TabItem_PreviewMouseLeftButtonDown"
+                                      PreviewMouseMove="PageDragSource_PreviewMouseMove">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
@@ -155,6 +157,9 @@
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <TextBlock x:Name="SecurityIcon" FontFamily="{StaticResource IconFont}" FontSize="12" Text="&#xE72E;"
+                                       Background="Transparent" Cursor="Hand"
+                                       PreviewMouseLeftButtonDown="SecurityIcon_PreviewMouseLeftButtonDown"
+                                       PreviewMouseMove="PageDragSource_PreviewMouseMove"
                                        Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="0,0,8,0" />
                             <TextBox x:Name="AddressBox" Grid.Column="1" Style="{StaticResource AddressTextBox}"
                                      KeyDown="AddressBox_KeyDown"

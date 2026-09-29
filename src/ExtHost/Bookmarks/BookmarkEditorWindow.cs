@@ -17,7 +17,8 @@ public sealed class BookmarkEditorWindow : Window
     private readonly TreeView? _tree;
     private readonly Button _saveButton;
 
-    private BookmarkEditorWindow(IBookmarkHost host, string title, bool isFolder, string name, string? url, BookmarkNode? selectedFolder, Window owner)
+    private BookmarkEditorWindow(IBookmarkHost host, string title, bool isFolder, string name, string? url, BookmarkNode? selectedFolder, Window owner,
+        bool folderTree = false)
     {
         _host = host;
         _isFolder = isFolder;
@@ -46,7 +47,10 @@ public sealed class BookmarkEditorWindow : Window
             _urlBox = new TextBox { Style = Res<Style>("DialogTextBox"), Text = url ?? "" };
             _urlBox.TextChanged += (_, _) => Validate();
             root.Children.Add(_urlBox);
+        }
 
+        if (!isFolder || folderTree)
+        {
             _tree = new TreeView
             {
                 Height = 220,
@@ -115,7 +119,9 @@ public sealed class BookmarkEditorWindow : Window
         {
             return;
         }
-        _saveButton.IsEnabled = _isFolder ? NameText.Length > 0 : FixedUrl != null && SelectedFolder != null;
+        _saveButton.IsEnabled = _isFolder
+            ? NameText.Length > 0 && (_tree == null || SelectedFolder != null)
+            : FixedUrl != null && SelectedFolder != null;
     }
 
     // ======================= 資料夾樹 =======================
@@ -203,6 +209,17 @@ public sealed class BookmarkEditorWindow : Window
         }
         var folder = dlg.SelectedFolder ?? parent;
         host.Bookmarks.AddUrl(folder, folder == parent ? index : -1, dlg.NameText, dlg.FixedUrl!);
+    }
+
+    /// <summary>「將所有分頁加入書籤」：輸入資料夾名稱並選擇放在哪裡。</summary>
+    public static (string Name, BookmarkNode Parent)? PromptNewFolderWithTree(IBookmarkHost host, string title, BookmarkNode selected)
+    {
+        var dlg = new BookmarkEditorWindow(host, title, true, "", null, selected, host.OwnerWindow, folderTree: true);
+        if (dlg.ShowDialog() != true || dlg.SelectedFolder == null)
+        {
+            return null;
+        }
+        return (dlg.NameText, dlg.SelectedFolder);
     }
 
     public static void EditFolder(IBookmarkHost host, BookmarkNode folder)

@@ -32,6 +32,9 @@ public interface IBookmarkHost
     void ToggleBookmarkBar();
 
     void ShowImportBookmarksDialog();
+
+    /// <summary>開啟書籤管理員（Ctrl+Shift+O），可指定要顯示的資料夾。</summary>
+    void OpenBookmarkManager(BookmarkNode? folder = null);
 }
 
 /// <summary>書籤的圖示、選單等共用 UI。</summary>
@@ -263,11 +266,37 @@ public static class BookmarkUi
         menu.Items.Add(Item("新增網頁…", () => BookmarkEditorWindow.AddUrl(host, addParent, addIndex)));
         menu.Items.Add(Item("新增資料夾…", () => BookmarkEditorWindow.AddFolder(host, addParent, addIndex)));
         menu.Items.Add(new Separator());
+        menu.Items.Add(Item("書籤管理員", () => host.OpenBookmarkManager(node?.IsFolder == true ? node : addParent), "Ctrl+Shift+O"));
         var show = new MenuItem { Header = "顯示書籤列", IsCheckable = true, IsChecked = host.IsBookmarkBarPinned, InputGestureText = "Ctrl+Shift+B" };
         show.Click += (_, _) => host.ToggleBookmarkBar();
         menu.Items.Add(show);
 
         menu.IsOpen = true;
+    }
+
+    /// <summary>「匯出書籤」：選擇存放位置後匯出成 HTML。</summary>
+    public static void ExportWithDialog(IBookmarkHost host)
+    {
+        var dlg = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = "匯出書籤",
+            FileName = BookmarkExporter.DefaultFileName(DateTime.Now),
+            DefaultExt = ".html",
+            Filter = "HTML 檔案 (*.html)|*.html|所有檔案 (*.*)|*.*",
+        };
+        if (dlg.ShowDialog(host.OwnerWindow) != true)
+        {
+            return;
+        }
+        try
+        {
+            BookmarkExporter.ExportHtml(host.Bookmarks, dlg.FileName);
+        }
+        catch (Exception ex)
+        {
+            AppPaths.Log("匯出書籤失敗：" + ex);
+            MessageBox.Show(host.OwnerWindow, "無法匯出書籤：\n" + ex.Message, "匯出書籤", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
     }
 
     public static void OpenAll(IBookmarkHost host, IReadOnlyList<string> urls)
@@ -297,7 +326,7 @@ public static class BookmarkUi
         host.Bookmarks.Remove(folder);
     }
 
-    private static void CopyText(string text)
+    public static void CopyText(string text)
     {
         try
         {

@@ -69,7 +69,17 @@ WebView2 只提供擴充功能的執行環境，沒有 Chrome 的瀏覽器介面
   - 左鍵：在目前分頁開啟；中鍵或 `Ctrl`+左鍵：在背景新分頁開啟；`Ctrl+Shift`+左鍵：在新分頁開啟並切換過去
   - 資料夾點一下展開下拉選單；選單開著時，滑鼠移到另一個資料夾會直接切換
   - 放不下的書籤收在右側的 `»` 選單；「其他書籤」有內容時會顯示在最右邊
-  - 右鍵選單：在新分頁中開啟、全部開啟、編輯、重新命名、複製、刪除、新增網頁、新增資料夾、顯示書籤列
+  - 右鍵選單：在新分頁中開啟、全部開啟、編輯、重新命名、複製、刪除、新增網頁、新增資料夾、書籤管理員、顯示書籤列
+  - **拖曳**：書籤可以拖曳排序；拖到資料夾中間放進資料夾；拖到「其他書籤」放進其他書籤。也可以把分頁、網址列左側的網站圖示，或網頁裡的連結拖到書籤列上加入書籤
+- **將所有分頁加入書籤**：`Ctrl+Shift+D`，把目前所有分頁存成一個書籤資料夾
+- **書籤管理員**：`Ctrl+Shift+O`（或在網址列輸入 `chrome://bookmarks`）
+  - 左側資料夾樹、右側書籤清單；上方搜尋框會搜尋所有書籤的名稱和網址
+  - `Ctrl` / `Shift` 多選，選取後上方會出現「已選取 N 個項目」工具列
+  - 拖曳排序，或拖到左側資料夾 / 清單中的資料夾來移動，可一次拖曳多個項目
+  - `Delete` 刪除，刪除後左下角會出現「復原」，也可以按 `Ctrl+Z` 復原
+  - `Enter` 或按兩下開啟（資料夾則進入資料夾）、`Ctrl+C` 複製網址、`Ctrl+F` 搜尋
+  - 右上角「⋮」：新增書籤、新增資料夾、依名稱排序、匯入書籤、匯出書籤
+- **匯出書籤**：選單 → 書籤 → 匯出書籤，產生的 HTML 檔與 Chrome 匯出的格式相同，可以匯入回 Chrome、Edge 或 Firefox
 - **網站圖示**：開過的網站會記住它的圖示；沒開過的網站顯示預設的地球圖示
 
 ### 從 Chrome / Edge 匯入書籤
@@ -110,6 +120,8 @@ Chrome 開著的時候也可以匯入。新版 Chrome 登入帳號後，部分�
 | `Ctrl+Shift+R` | 重新載入所有擴充功能 |
 | `Ctrl+D` | 將這個分頁加入書籤 / 編輯書籤 |
 | `Ctrl+Shift+B` | 顯示 / 隱藏書籤列 |
+| `Ctrl+Shift+O` | 書籤管理員 |
+| `Ctrl+Shift+D` | 將所有分頁加入書籤 |
 | 滑鼠中鍵點分頁 | 關閉分頁 |
 
 ## settings.json 欄位
@@ -157,10 +169,13 @@ src/ExtHost/
     BookmarkBubble.cs        星號 / Ctrl+D 的「已加入書籤」小視窗
     BookmarkEditorWindow.cs  編輯書籤、新增網頁、新增 / 重新命名資料夾
     ImportBookmarksWindow.cs 匯入書籤和設定（偵測 Chrome / Edge 設定檔、手動路徑導引、HTML 檔）
-    BookmarkUi.cs            書籤圖示、下拉選單、右鍵選單
+    BookmarkManagerPage.cs   書籤管理員（資料夾樹、清單、搜尋、多選、拖放、復原）
+    BookmarkDrag.cs          拖放的資料格式與位置提示
+    BookmarkUi.cs            書籤圖示、下拉選單、右鍵選單、匯出
   Tabs/
     WebTab.cs                網頁分頁（一個分頁 = 一個 WebView2）
     ExtensionsTab.cs         擴充功能管理分頁
+    BookmarksTab.cs          書籤管理員分頁
     ExtensionsPage.xaml(.cs) 擴充功能管理畫面
   Services/
     BrowserEnvironment.cs    共用 WebView2 環境（開啟擴充功能支援）
@@ -170,6 +185,7 @@ src/ExtHost/
     UrlHelper.cs             網址列輸入轉換
     BookmarkStore.cs         書籤資料（Bookmarks.json，Chrome 相同格式）
     BookmarkImporter.cs      讀取 Chrome / Edge 書籤檔與 HTML 書籤檔、偵測設定檔
+    BookmarkExporter.cs      匯出成 HTML 書籤檔
     FaviconCache.cs          網站圖示快取
     AppSettings.cs / AppPaths.cs
 samples/page-helper-demo/    範例擴充功能

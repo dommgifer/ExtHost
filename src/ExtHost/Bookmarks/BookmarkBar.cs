@@ -100,6 +100,12 @@ public sealed class BookmarkBar : Border
     private Button? _pendingSwitch;
     private bool _dirty;
 
+    // 拖曳
+    private Point _dragStart;
+    private BookmarkNode? _dragCandidate;
+    private bool _justDragged;
+    private DropIndicatorAdorner? _dropIndicator;
+
     public BookmarkBar()
     {
         Background = Res<Brush>("SurfaceBrush");
@@ -183,6 +189,13 @@ public sealed class BookmarkBar : Border
             e.Handled = true;
             BookmarkUi.ShowContextMenu(_host, null, _host.Bookmarks.BookmarkBar, -1, this);
         };
+
+        // 拖放：書籤排序、拖進資料夾、把分頁或網頁連結拖進來加入書籤
+        AllowDrop = true;
+        DragEnter += OnDragOver;
+        DragOver += OnDragOver;
+        DragLeave += (_, _) => _dropIndicator?.Clear();
+        Drop += OnDrop;
 
         _rebuildTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
         _rebuildTimer.Tick += (_, _) =>
@@ -288,13 +301,41 @@ public sealed class BookmarkBar : Border
             b.Padding = new Thickness(6, 0, 6, 0);
         }
 
+        b.PreviewMouseLeftButtonDown += (_, e) =>
+        {
+            _dragStart = e.GetPosition(this);
+            _dragCandidate = node;
+            _justDragged = false;
+        };
+        b.PreviewMouseMove += (_, e) =>
+        {
+            if (e.LeftButton == MouseButtonState.Pressed && _dragCandidate == node
+                && BookmarkDrag.IsDragGesture(_dragStart, e.GetPosition(this)))
+            {
+                _dragCandidate = null;
+                StartDrag(b, node);
+            }
+        };
+
         if (node.IsFolder)
         {
-            b.Click += (_, _) => ToggleMenu(b);
+            b.Click += (_, _) =>
+            {
+                if (!_justDragged)
+                {
+                    ToggleMenu(b);
+                }
+            };
         }
         else
         {
-            b.Click += (_, _) => _host?.OpenUrl(node.Url!, BookmarkUi.DispositionFor(MouseButton.Left));
+            b.Click += (_, _) =>
+            {
+                if (!_justDragged)
+                {
+                    _host?.OpenUrl(node.Url!, BookmarkUi.DispositionFor(MouseButton.Left));
+                }
+            };
             b.MouseUp += (_, e) =>
             {
                 if (e.ChangedButton == MouseButton.Middle)
@@ -314,6 +355,130 @@ public sealed class BookmarkBar : Border
             BookmarkUi.ShowContextMenu(_host, node, node.Parent!, node.IndexInParent + 1, b);
         };
         return b;
+    }
+
+    // ======================= 拖放 =======================
+
+    private void StartDrag(Button source, BookmarkNode node)
+    {
+        CloseMenu();
+        _justDragged = true;
+        try
+        {
+            DragDrop.DoDragDrop(source, BookmarkDrag.ForNodes(new[] { node }),
+                DragDropEffects.Move | DragDropEffects.Copy | DragDropEffects.Link);
+        }
+        catch (Exception ex)
+        {
+            AppPaths.Log("拖曳書籤失敗：" + ex.Message);
+        }
+        finally
+        {
+            ClearDropIndicator();
+            // Click 事件（如果有）會在這之後觸發，延後重設
+            Dispatcher.BeginInvoke(() => _justDragged = false, DispatcherPriority.Input);
+        }
+    }
+
+    /// <summary>計算放開滑鼠時的目標：放進哪個資料夾的哪個位置，以及要畫的提示。</summary>
+    private (BookmarkNode Parent, int Index, Rect? Box, (Point, Point)? Line)? DropTargetAt(Point p)
+    {
+        var store = _host!.Bookmarks;
+        var h = _panel.ActualHeight;
+
+        Rect BoundsOf(FrameworkElement el)
+        {
+            var tl = el.TranslatePoint(new Point(0, 0), _panel);
+            return new Rect(tl, new Size(el.ActualWidth, el.ActualHeight));
+        }
+
+        if (_otherHost.Visibility == Visibility.Visible)
+        {
+            var r = BoundsOf(_otherButton);
+            if (p.X >= r.Left - 6)
+            {
+                return (store.Other, -1, r, null);
+            }
+        }
+
+        var buttons = _panel.Children.OfType<Button>().Take(_panel.VisibleCount).ToList();
+        if (_panel.VisibleCount < store.BookmarkBar.Children.Count)
+        {
+            var cr = BoundsOf(_chevron);
+            if (p.X >= cr.Left)
+            {
+                return (store.BookmarkBar, -1, cr, null);
+            }
+        }
+
+        for (var i = 0; i < buttons.Count; i++)
+        {
+            var r = BoundsOf(buttons[i]);
+            if (p.X < r.Left || p.X >= r.Right)
+            {
+                continue;
+            }
+            var node = (BookmarkNode)buttons[i].Tag;
+            var third = r.Width / 4;
+            if (node.IsFolder && p.X >= r.Left + third && p.X < r.Right - third)
+            {
+                return (node, -1, r, null);
+            }
+            var before = p.X < r.Left + r.Width / 2;
+            var x = before ? r.Left - 1 : r.Right - 1;
+            return (store.BookmarkBar, before ? i : i + 1, null, (new Point(x, 4), new Point(x, h - 4)));
+        }
+
+        // 最後一個書籤後面的空白處
+        var endX = buttons.Count > 0 ? BoundsOf(buttons[^1]).Right - 1 : 1;
+        return (store.BookmarkBar, buttons.Count, null, (new Point(endX, 4), new Point(endX, h - 4)));
+    }
+
+    private void OnDragOver(object sender, DragEventArgs e)
+    {
+        e.Handled = true;
+        if (_host == null)
+        {
+            e.Effects = DragDropEffects.None;
+            return;
+        }
+        var nodes = BookmarkDrag.GetNodes(e.Data, _host.Bookmarks);
+        var page = nodes == null ? BookmarkDrag.GetPage(e.Data) : null;
+        var target = nodes != null || page != null ? DropTargetAt(e.GetPosition(_panel)) : null;
+        if (target is not { } t || (nodes != null && nodes.All(n => !BookmarkStore.CanMove(n, t.Parent))))
+        {
+            e.Effects = DragDropEffects.None;
+            _dropIndicator?.Clear();
+            return;
+        }
+        e.Effects = nodes != null ? DragDropEffects.Move : (e.AllowedEffects & DragDropEffects.Link) != 0 ? DragDropEffects.Link : DragDropEffects.Copy;
+
+        _dropIndicator ??= DropIndicatorAdorner.Attach(_panel);
+        if (t.Box is { } box)
+        {
+            _dropIndicator?.ShowBox(box);
+        }
+        else if (t.Line is { } line)
+        {
+            _dropIndicator?.ShowLine(line.Item1, line.Item2);
+        }
+    }
+
+    private void OnDrop(object sender, DragEventArgs e)
+    {
+        e.Handled = true;
+        ClearDropIndicator();
+        if (_host == null || DropTargetAt(e.GetPosition(_panel)) is not { } t)
+        {
+            return;
+        }
+        BookmarkDrag.Drop(e.Data, _host.Bookmarks, t.Parent, t.Index);
+    }
+
+    private void ClearDropIndicator()
+    {
+        _dropIndicator?.Detach();
+        _dropIndicator = null;
     }
 
     // ======================= 下拉選單 =======================
