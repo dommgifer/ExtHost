@@ -1,0 +1,110 @@
+# ExtHost 的編譯與發布
+# - 開 PR / 推送到 PR：編譯並跑測試（不產出檔案）
+# - 合併到 main：編譯、測試，並產出 Artifact（測試版，保留 30 天）
+# - 推送 v* 標籤（例如 v0.2.0）：編譯、測試，並建立 GitHub Release（正式版）
+name: Build
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    runs-on: windows-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: 測試
+        run: dotnet test tests/ExtHost.Tests/ExtHost.Tests.csproj -c Release
+
+      - name: 決定版本號
+        id: version
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            # v0.2.0 → 0.2.0
+            $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          } else {
+            # csproj 的版本 + 編譯編號，例如 0.1.0-build.12
+            [xml]$proj = Get-Content src/ExtHost/ExtHost.csproj
+            $base = ($proj.Project.PropertyGroup | ForEach-Object { $_.Version } | Where-Object { $_ } | Select-Object -First 1)
+            $version = "$base-build.$env:GITHUB_RUN_NUMBER"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "版本：$version"
+
+      - name: 編譯單一執行檔
+        shell: pwsh
+        run: ./build.ps1 -Version ${{ steps.version.outputs.version }}
+
+      # 合併到 main（或手動執行）時產出測試版
+      - name: 上傳 Artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ExtHost-${{ steps.version.outputs.version }}
+          path: dist/
+          retention-days: 30
+          if-no-files-found: error
+
+      # 推送標籤時，把 dist 打包成 zip 交給 release 工作
+      - name: 打包 zip
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        run: Compress-Archive -Path dist/* -DestinationPath "ExtHost-${{ steps.version.outputs.version }}.zip"
+
+      - name: 上傳 Release 用的 zip
+        if: github.ref_type == 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-zip
+          path: ExtHost-${{ steps.version.outputs.version }}.zip
+          retention-days: 1
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-zip
+
+      - name: 建立 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          zip="ExtHost-$VERSION.zip"
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            # 在 GitHub 網頁上建立 Release 時標籤已經有對應的 Release，只補上檔案
+            gh release upload "$GITHUB_REF_NAME" "$zip" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            # 版本號含「-」（例如 1.0.0-beta.1）視為預先發行版
+            prerelease=""
+            if [[ "$VERSION" == *-* ]]; then prerelease="--prerelease"; fi
+            gh release create "$GITHUB_REF_NAME" "$zip" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "ExtHost $VERSION" \
+              --generate-notes \
+              $prerelease
+          fi

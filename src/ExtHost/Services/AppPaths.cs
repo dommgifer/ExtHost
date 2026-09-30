@@ -6,6 +6,7 @@ namespace ExtHost.Services;
 /// 程式資料的存放位置。
 /// 預設：%LOCALAPPDATA%\ExtHost
 /// 可攜模式：執行檔旁邊放一個名為 "portable" 的空檔案，資料就會存在執行檔旁的 data 資料夾。
+/// 環境變數 EXTHOST_DATA_DIR 有設定時優先使用（自動化測試用，避免動到真正的使用者資料）。
 /// </summary>
 public static class AppPaths
 {
@@ -13,8 +14,9 @@ public static class AppPaths
 
     public static bool IsPortable { get; } = File.Exists(Path.Combine(ExeDirectory, "portable"));
 
-    public static string Root { get; } = IsPortable
-        ? Path.Combine(ExeDirectory, "data")
+    public static string Root { get; } =
+        Environment.GetEnvironmentVariable("EXTHOST_DATA_DIR") is { Length: > 0 } overrideDir ? overrideDir
+        : IsPortable ? Path.Combine(ExeDirectory, "data")
         : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ExtHost");
 
     /// <summary>WebView2 使用者資料（Cookie、快取、擴充功能狀態）。</summary>
