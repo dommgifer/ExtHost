@@ -142,6 +142,32 @@ Chrome 開著的時候也可以匯入。新版 Chrome 登入帳號後，部分�
 
 要修改設定，可以從右上角選單 →「編輯 settings.json」開啟。**請先關閉 ExtHost 再改**，因為程式關閉時會覆寫這個檔案。
 
+## 下載
+
+- **正式版**：到 repo 的 [Releases](../../releases) 頁面下載 `ExtHost-版本.zip`，解壓縮後執行 `ExtHost.exe`
+- **測試版**：每次合併到 `main` 都會自動編譯一次。到 [Actions](../../actions/workflows/build.yml) 點進最新一次成功的執行，在頁面下方的 Artifacts 下載 `ExtHost-0.1.0-build.編號`（需要登入 GitHub，保留 30 天）
+
+「關於 ExtHost」會顯示版本號，測試版會帶編譯編號（例如 `0.1.0-build.12`），方便對照是哪一次編譯。
+
+## 自動編譯與發布（GitHub Actions）
+
+設定在 `.github/workflows/build.yml`，在 GitHub 的 Windows 機器上編譯：
+
+| 時機 | 做什麼 |
+|---|---|
+| 開 PR / 推送到 PR | 執行測試並編譯，確認沒有壞掉（不產出檔案） |
+| 合併到 `main` | 執行測試並編譯，產出測試版 Artifact |
+| 推送 `v*` 標籤 | 執行測試並編譯，建立 GitHub Release，附上 zip |
+
+**發布正式版**：先把 `src/ExtHost/ExtHost.csproj` 的 `<Version>` 改成新版本並合併，再推送同版本的標籤：
+
+```powershell
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+也可以在 GitHub 的 Releases 頁面按「Draft a new release」直接建立標籤。版本號含 `-`（例如 `v1.0.0-beta.1`）會標成預先發行版。
+
 ## 自行編譯
 
 需要 .NET 8 SDK。在 Windows 上執行：
@@ -156,7 +182,17 @@ Chrome 開著的時候也可以匯入。新版 Chrome 登入帳號後，部分�
 dotnet publish src\ExtHost\ExtHost.csproj -c Release -o dist
 ```
 
-產出的檔案是 `dist\ExtHost.exe`。專案已設定為 self-contained 單一執行檔，也可以在 Linux / macOS 上用 `build.sh` 交叉編譯；不過在非 Windows 環境編譯時，exe 檔案本身不會嵌入圖示（視窗圖示不受影響）。
+產出的檔案是 `dist\ExtHost.exe`。要指定版本號可以加上 `-Version`，例如 `.\build.ps1 -Version 0.2.0`（`build.sh` 則是 `./build.sh 0.2.0`）。
+
+執行測試：
+
+```powershell
+dotnet test tests\ExtHost.Tests\ExtHost.Tests.csproj
+```
+
+測試只涵蓋書籤的資料處理（讀寫、匯入匯出、存檔失敗的保護），不含介面。測試會把資料放在暫存資料夾，不會動到你的書籤。
+
+專案已設定為 self-contained 單一執行檔，也可以在 Linux / macOS 上用 `build.sh` 交叉編譯；不過在非 Windows 環境編譯時，exe 檔案本身不會嵌入圖示（視窗圖示不受影響）。
 
 ## 專案結構
 
@@ -190,6 +226,8 @@ src/ExtHost/
     BookmarkExporter.cs      匯出成 HTML 書籤檔
     FaviconCache.cs          網站圖示快取
     AppSettings.cs / AppPaths.cs
+tests/ExtHost.Tests/          書籤資料層的自動測試（xUnit）
+.github/workflows/build.yml  自動編譯、測試、產出 Artifact 與 Release
 samples/page-helper-demo/    範例擴充功能
 ```
 

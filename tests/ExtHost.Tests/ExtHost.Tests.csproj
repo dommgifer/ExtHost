@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    書籤資料層（Services）的自動測試。
+    主程式是 WPF（net8.0-windows），這裡只連結不依賴 WPF 的原始檔，所以在 Windows / Linux 都能執行。
+  -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <RootNamespace>ExtHost.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\src\ExtHost\Services\AppPaths.cs" Link="Linked\AppPaths.cs" />
+    <Compile Include="..\..\src\ExtHost\Services\UrlHelper.cs" Link="Linked\UrlHelper.cs" />
+    <Compile Include="..\..\src\ExtHost\Services\BookmarkStore.cs" Link="Linked\BookmarkStore.cs" />
+    <Compile Include="..\..\src\ExtHost\Services\BookmarkImporter.cs" Link="Linked\BookmarkImporter.cs" />
+    <Compile Include="..\..\src\ExtHost\Services\BookmarkExporter.cs" Link="Linked\BookmarkExporter.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+</Project>

@@ -989,7 +989,12 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
 
     private void ShowAbout()
     {
-        var ver = typeof(App).Assembly.GetName().Version?.ToString(3) ?? "";
+        // 版本含編譯編號（例如 0.1.0-build.12），去掉 SDK 自動附加的「+commit」
+        var info = typeof(App).Assembly
+            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            .OfType<System.Reflection.AssemblyInformationalVersionAttribute>()
+            .FirstOrDefault()?.InformationalVersion;
+        var ver = info?.Split('+')[0] ?? typeof(App).Assembly.GetName().Version?.ToString(3) ?? "";
         MessageBox.Show(this,
             $"ExtHost {ver}\n\n以 WebView2 為核心的瀏覽器，可載入自製擴充功能。\n\n" +
             $"WebView2 Runtime：{_env?.BrowserVersionString}\n資料位置：{AppPaths.Root}",
