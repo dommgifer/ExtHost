@@ -7,6 +7,8 @@ public static class UrlHelper
 {
     public const string ExtensionsPageUrl = "exthost://extensions";
 
+    public const string BookmarksPageUrl = "exthost://bookmarks";
+
     private static readonly string[] PassThroughPrefixes =
     {
         "about:", "data:", "edge:", "chrome:", "view-source:", "blob:", "javascript:", "mailto:",
@@ -17,6 +19,25 @@ public static class UrlHelper
 
     /// <summary>把網址列輸入轉成可導覽的網址；空字串回傳 null。</summary>
     public static string? ToNavigableUrl(string input, string searchUrl)
+    {
+        var text = input.Trim();
+        if (text.Length == 0)
+        {
+            return null;
+        }
+
+        var url = FixupUrl(text);
+        if (url != null)
+        {
+            return url;
+        }
+
+        var template = string.IsNullOrWhiteSpace(searchUrl) ? "https://www.google.com/search?q={0}" : searchUrl;
+        return template.Replace("{0}", Uri.EscapeDataString(text));
+    }
+
+    /// <summary>把輸入整理成網址（例如 google.com → https://google.com）；看起來不像網址則回傳 null。</summary>
+    public static string? FixupUrl(string input)
     {
         var text = input.Trim();
         if (text.Length == 0)
@@ -46,7 +67,7 @@ public static class UrlHelper
             }
             catch
             {
-                // 當成搜尋
+                // 不是網址
             }
         }
 
@@ -75,8 +96,7 @@ public static class UrlHelper
             }
         }
 
-        var template = string.IsNullOrWhiteSpace(searchUrl) ? "https://www.google.com/search?q={0}" : searchUrl;
-        return template.Replace("{0}", Uri.EscapeDataString(text));
+        return null;
     }
 
     public static bool IsSecure(string? url) =>

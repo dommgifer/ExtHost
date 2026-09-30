@@ -8,13 +8,14 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shell;
+using ExtHost.Bookmarks;
 using ExtHost.Services;
 using ExtHost.Tabs;
 using Microsoft.Web.WebView2.Core;
 
 namespace ExtHost;
 
-public partial class MainWindow : Window, IBrowserShell
+public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
 {
     private readonly ObservableCollection<TabBase> _tabs = new();
     private CoreWebView2Environment? _env;
@@ -26,12 +27,20 @@ public partial class MainWindow : Window, IBrowserShell
 
     public ExtensionManager? Extensions { get; private set; }
 
+    public BookmarkStore Bookmarks { get; }
+
+    public Window OwnerWindow => this;
+
     private TabBase? SelectedTab => TabList.SelectedItem as TabBase;
 
     public MainWindow()
     {
         InitializeComponent();
         TabList.ItemsSource = _tabs;
+
+        Bookmarks = BookmarkStore.Load();
+        Bookmarks.Changed += (_, _) => UpdateStar();
+        BookmarkBarControl.Initialize(this);
 
         RestorePlacement();
         ApplyDevMode();
@@ -68,6 +77,21 @@ public partial class MainWindow : Window, IBrowserShell
         }
 
         RuntimeText.Text = "WebView2 " + _env.BrowserVersionString;
+
+        if (Bookmarks.LoadError != null)
+        {
+            // 書籤檔讀不到：已停止寫入，提醒使用者如何復原
+            var answer = MessageBox.Show(this,
+                "無法讀取書籤檔。為避免覆寫原本的書籤，ExtHost 已停止儲存書籤，這段期間無法新增或修改書籤。\n\n"
+                + "原因：" + Bookmarks.LoadError + "\n\n"
+                + "復原方式：關閉 ExtHost，修復 Bookmarks.json（或用備份檔取代它；若不需要舊書籤也可以直接刪除），再重新啟動。\n\n"
+                + "要開啟資料資料夾嗎？",
+                "書籤", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (answer == MessageBoxResult.Yes)
+            {
+                StartShell("explorer.exe", $"/select,\"{AppPaths.BookmarksFile}\"");
+            }
+        }
         ProfileText.Text = AppPaths.IsPortable ? "可攜模式" : "";
 
         WebTab first;
@@ -119,6 +143,10 @@ public partial class MainWindow : Window, IBrowserShell
             if (url == UrlHelper.ExtensionsPageUrl)
             {
                 OpenExtensionsTab(select: false);
+            }
+            else if (url == UrlHelper.BookmarksPageUrl)
+            {
+                OpenBookmarkManagerTab(select: false);
             }
             else if (!firstUsed)
             {
@@ -237,6 +265,25 @@ public partial class MainWindow : Window, IBrowserShell
         {
             TabList.SelectedItem = existing;
         }
+    }
+
+    private BookmarksTab OpenBookmarkManagerTab(bool select = true)
+    {
+        var existing = _tabs.OfType<BookmarksTab>().FirstOrDefault();
+        if (existing == null)
+        {
+            existing = new BookmarksTab(this);
+            existing.View.Visibility = Visibility.Hidden;
+            ContentHost.Children.Add(existing.View);
+            var index = SelectedTab != null ? _tabs.IndexOf(SelectedTab) + 1 : _tabs.Count;
+            _tabs.Insert(Math.Min(index, _tabs.Count), existing);
+            existing.PropertyChanged += Tab_PropertyChanged;
+        }
+        if (select)
+        {
+            TabList.SelectedItem = existing;
+        }
+        return existing;
     }
 
     private void CloseTab(TabBase tab)
@@ -399,15 +446,18 @@ public partial class MainWindow : Window, IBrowserShell
         }
 
         SecurityIcon.Text = UrlHelper.IsSecure(url) ? ""
-            : UrlHelper.IsExtensionUrl(url) || tab is ExtensionsTab ? ""
+            : UrlHelper.IsExtensionUrl(url) || tab is ExtensionsTab or BookmarksTab ? ""
             : UrlHelper.IsBlank(url) ? ""
             : "";
         SecurityIcon.ToolTip = UrlHelper.IsSecure(url) ? "安全連線 (HTTPS)"
             : UrlHelper.IsBlank(url) ? null
+            : tab is BookmarksTab ? "書籤管理員"
             : tab is ExtensionsTab || UrlHelper.IsExtensionUrl(url) ? "擴充功能頁面"
             : "非加密連線";
 
         UpdateInjectChip();
+        UpdateStar();
+        UpdateBookmarkBarVisibility();
     }
 
     private void UpdateInjectChip()
@@ -472,6 +522,9 @@ public partial class MainWindow : Window, IBrowserShell
             case ExtensionsTab x:
                 _ = Extensions?.RefreshAsync();
                 x.OnActivated();
+                break;
+            case BookmarksTab b:
+                b.OnActivated();
                 break;
         }
     }
@@ -542,6 +595,13 @@ public partial class MainWindow : Window, IBrowserShell
         if (text.Trim().Equals(UrlHelper.ExtensionsPageUrl, StringComparison.OrdinalIgnoreCase))
         {
             OpenExtensionsTab();
+            return;
+        }
+        if (text.Trim().TrimEnd('/') is var t
+            && (t.Equals(UrlHelper.BookmarksPageUrl, StringComparison.OrdinalIgnoreCase)
+                || t.Equals("chrome://bookmarks", StringComparison.OrdinalIgnoreCase)))
+        {
+            OpenBookmarkManager();
             return;
         }
 
@@ -679,6 +739,212 @@ public partial class MainWindow : Window, IBrowserShell
         }
     }
 
+    // ======================= 書籤 =======================
+
+    public bool IsBookmarkBarPinned => Settings.ShowBookmarkBar;
+
+    private bool CanBookmarkCurrent => SelectedTab is WebTab w && !UrlHelper.IsBlank(w.Url);
+
+    private void UpdateStar()
+    {
+        if (!CanBookmarkCurrent)
+        {
+            StarButton.Visibility = Visibility.Collapsed;
+            return;
+        }
+        var bookmarked = Bookmarks.FindByUrl(SelectedTab!.Url) != null;
+        StarButton.Visibility = Visibility.Visible;
+        StarButton.Content = bookmarked ? BookmarkUi.StarFillGlyph : BookmarkUi.StarGlyph;
+        StarButton.Foreground = (Brush)FindResource(bookmarked ? "AccentBrush" : "MutedBrush");
+        StarButton.ToolTip = bookmarked ? "編輯此分頁的書籤 (Ctrl+D)" : "將這個分頁加入書籤 (Ctrl+D)";
+    }
+
+    /// <summary>與 Chrome 相同：沒有開啟「顯示書籤列」時，只在新分頁顯示書籤列。</summary>
+    private void UpdateBookmarkBarVisibility()
+    {
+        var onNewTab = SelectedTab is WebTab w && UrlHelper.IsBlank(w.Url);
+        var show = !_isFullScreen && (Settings.ShowBookmarkBar || onNewTab);
+        BookmarkBarControl.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        // 書籤列和工具列之間不畫分隔線
+        ToolbarBorder.BorderThickness = new Thickness(0, 0, 0, show ? 0 : 1);
+    }
+
+    public void ToggleBookmarkBar()
+    {
+        Settings.ShowBookmarkBar = !Settings.ShowBookmarkBar;
+        Settings.Save();
+        UpdateBookmarkBarVisibility();
+    }
+
+    private void Star_Click(object sender, RoutedEventArgs e) => ShowBookmarkBubble();
+
+    private void ShowBookmarkBubble()
+    {
+        if (SelectedTab is not WebTab w || UrlHelper.IsBlank(w.Url))
+        {
+            return;
+        }
+        var folder = Settings.LastBookmarkFolderId is { } id && Bookmarks.FindById(id) is { IsFolder: true } f
+            ? f
+            : Bookmarks.BookmarkBar;
+        var title = string.IsNullOrWhiteSpace(w.Title) ? w.Url : w.Title;
+        BookmarkBubble.Toggle(this, StarButton, w.Url, title, folder, chosen =>
+        {
+            if (Settings.LastBookmarkFolderId != chosen.Id)
+            {
+                Settings.LastBookmarkFolderId = chosen.Id;
+                Settings.Save();
+            }
+        });
+    }
+
+    public void ShowImportBookmarksDialog()
+    {
+        BookmarkBubble.Current?.Close();
+        new ImportBookmarksWindow(this).ShowDialog();
+    }
+
+    public void OpenUrl(string url, OpenDisposition disposition)
+    {
+        switch (disposition)
+        {
+            case OpenDisposition.CurrentTab when SelectedTab is WebTab w:
+                w.Navigate(url);
+                w.WebView.Focus();
+                break;
+            case OpenDisposition.CurrentTab:
+            case OpenDisposition.NewForegroundTab:
+                OpenInNewTab(url);
+                break;
+            case OpenDisposition.NewBackgroundTab:
+                var index = SelectedTab != null ? _tabs.IndexOf(SelectedTab) + 1 : (int?)null;
+                _ = CreateBackgroundTabSafeAsync(url, index);
+                break;
+        }
+    }
+
+    public void OpenUrls(IReadOnlyList<string> urls)
+    {
+        var start = SelectedTab != null ? _tabs.IndexOf(SelectedTab) + 1 : _tabs.Count;
+        for (var i = 0; i < urls.Count; i++)
+        {
+            if (i == 0)
+            {
+                _ = CreateTabSafeAsync(urls[i], start);
+            }
+            else
+            {
+                _ = CreateBackgroundTabSafeAsync(urls[i], start + i);
+            }
+        }
+    }
+
+    private async Task CreateBackgroundTabSafeAsync(string url, int? index)
+    {
+        try
+        {
+            await CreateWebTabAsync(url, select: false, index: index);
+        }
+        catch (Exception ex)
+        {
+            ShowError("無法開啟新分頁：" + ex.Message);
+        }
+    }
+
+    public void OpenBookmarkManager(BookmarkNode? folder = null)
+    {
+        BookmarkBubble.Current?.Close();
+        var tab = OpenBookmarkManagerTab();
+        if (folder != null)
+        {
+            tab.Page.ShowFolder(folder);
+        }
+    }
+
+    /// <summary>Ctrl+Shift+D：把所有網頁分頁存成一個書籤資料夾。</summary>
+    private void BookmarkAllTabs()
+    {
+        var pages = _tabs.OfType<WebTab>().Where(t => !UrlHelper.IsBlank(t.Url)).ToList();
+        if (pages.Count == 0)
+        {
+            return;
+        }
+        var folder = Settings.LastBookmarkFolderId is { } id && Bookmarks.FindById(id) is { IsFolder: true } f
+            ? f
+            : Bookmarks.BookmarkBar;
+        if (BookmarkEditorWindow.PromptNewFolderWithTree(this, "將所有分頁加入書籤", folder) is not { } result)
+        {
+            return;
+        }
+        var created = BookmarkNode.NewFolder(result.Name);
+        foreach (var t in pages)
+        {
+            var n = BookmarkNode.NewUrl(string.IsNullOrWhiteSpace(t.Title) ? t.Url : t.Title, t.Url);
+            n.Parent = created;
+            created.Children.Add(n);
+        }
+        Bookmarks.AddTree(result.Parent, new[] { created });
+        Bookmarks.Commit();
+    }
+
+    // ---- 拖曳分頁或網址列的網站圖示到書籤列 ----
+
+    private Point _pageDragStart;
+    private WebTab? _pageDragTab;
+
+    private void TabItem_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        _pageDragStart = e.GetPosition(this);
+        _pageDragTab = (sender as FrameworkElement)?.DataContext as WebTab;
+    }
+
+    private void SecurityIcon_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        _pageDragStart = e.GetPosition(this);
+        _pageDragTab = SelectedTab as WebTab;
+    }
+
+    private void PageDragSource_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed || _pageDragTab is not { } tab
+            || !BookmarkDrag.IsDragGesture(_pageDragStart, e.GetPosition(this)))
+        {
+            return;
+        }
+        _pageDragTab = null;
+        if (UrlHelper.IsBlank(tab.Url))
+        {
+            return;
+        }
+        var title = string.IsNullOrWhiteSpace(tab.Title) ? tab.Url : tab.Title;
+        try
+        {
+            DragDrop.DoDragDrop((DependencyObject)sender, BookmarkDrag.ForPage(tab.Url, title), DragDropEffects.Copy | DragDropEffects.Link);
+        }
+        catch (Exception ex)
+        {
+            AppPaths.Log("拖曳分頁失敗：" + ex.Message);
+        }
+    }
+
+    private MenuItem BuildBookmarksMenu()
+    {
+        var root = new MenuItem { Header = "書籤" };
+        var add = MakeMenuItem("為這個分頁加入書籤…", ShowBookmarkBubble, "Ctrl+D");
+        add.IsEnabled = CanBookmarkCurrent;
+        root.Items.Add(add);
+        var show = MakeMenuItem("顯示書籤列", ToggleBookmarkBar, "Ctrl+Shift+B");
+        show.IsCheckable = true;
+        show.IsChecked = Settings.ShowBookmarkBar;
+        root.Items.Add(MakeMenuItem("將所有分頁加入書籤…", BookmarkAllTabs, "Ctrl+Shift+D"));
+        root.Items.Add(show);
+        root.Items.Add(MakeMenuItem("書籤管理員", () => OpenBookmarkManager(), "Ctrl+Shift+O"));
+        root.Items.Add(new Separator());
+        root.Items.Add(MakeMenuItem("匯入書籤和設定…", ShowImportBookmarksDialog));
+        root.Items.Add(MakeMenuItem("匯出書籤…", () => BookmarkUi.ExportWithDialog(this)));
+        return root;
+    }
+
     // ======================= 主選單 =======================
 
     private void MainMenu_Click(object sender, RoutedEventArgs e)
@@ -686,6 +952,7 @@ public partial class MainWindow : Window, IBrowserShell
         var menu = new ContextMenu { PlacementTarget = (UIElement)sender, Placement = PlacementMode.Bottom };
         menu.Items.Add(MakeMenuItem("新增分頁", () => _ = CreateTabSafeAsync(Settings.HomePage, null), "Ctrl+T"));
         menu.Items.Add(MakeMenuItem("擴充功能管理", () => OpenExtensionsTab(), "Ctrl+Shift+E"));
+        menu.Items.Add(BuildBookmarksMenu());
         menu.Items.Add(new Separator());
         menu.Items.Add(MakeToggleItem("開發人員模式", Settings.DevMode, v =>
         {
@@ -840,6 +1107,22 @@ public partial class MainWindow : Window, IBrowserShell
         {
             OpenExtensionsTab();
         }
+        else if (ctrl && !shift && !alt && key == Key.D)
+        {
+            ShowBookmarkBubble();
+        }
+        else if (ctrl && shift && !alt && key == Key.B)
+        {
+            ToggleBookmarkBar();
+        }
+        else if (ctrl && shift && !alt && key == Key.O)
+        {
+            OpenBookmarkManager();
+        }
+        else if (ctrl && shift && !alt && key == Key.D)
+        {
+            BookmarkAllTabs();
+        }
         else if ((mods == ModifierKeys.None && key == Key.F12) || (ctrl && shift && key == Key.I))
         {
             (SelectedTab as WebTab)?.OpenDevTools();
@@ -973,6 +1256,7 @@ public partial class MainWindow : Window, IBrowserShell
             });
             WindowState = _stateBeforeFullScreen;
         }
+        UpdateBookmarkBarVisibility();
         UpdateMaximizeState();
     }
 

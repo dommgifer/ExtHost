@@ -43,6 +43,12 @@ public sealed class AppSettings
 
     public List<string> LastSession { get; set; } = new();
 
+    /// <summary>一律顯示書籤列（Ctrl+Shift+B）。關閉時與 Chrome 相同，只在新分頁顯示。</summary>
+    public bool ShowBookmarkBar { get; set; }
+
+    /// <summary>上次用星號加入書籤時選的資料夾。</summary>
+    public long? LastBookmarkFolderId { get; set; }
+
     public List<RegisteredExtension> Extensions { get; set; } = new();
 
     public double? WindowLeft { get; set; }

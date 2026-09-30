@@ -184,6 +184,7 @@ public sealed class WebTab : TabBase
                 Icon = null;
                 return;
             }
+            FaviconCache.Store(core.Source, ms.ToArray());
             ms.Position = 0;
             var bmp = new BitmapImage();
             bmp.BeginInit();
