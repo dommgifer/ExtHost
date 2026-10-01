@@ -50,7 +50,51 @@ public sealed class WebTab : TabBase
         private set => Set(ref _statusText, value);
     }
 
+    /// <summary>此分頁是否由網頁腳本開啟（window.open、target=_blank）。</summary>
+    public bool OpenedByScript { get; set; }
+
+    /// <summary>
+    /// 比照 Chrome 的規則判斷網頁能否用 window.close() 關閉此分頁：
+    /// 由腳本開啟的分頁，或歷史紀錄只有一筆的分頁才可以。
+    /// WebView2 不做這個檢查，一律觸發 WindowCloseRequested，所以由宿主自己判斷。
+    /// </summary>
+    public async Task<bool> IsScriptClosableAsync()
+    {
+        if (OpenedByScript)
+        {
+            return true;
+        }
+        var core = Core;
+        if (core == null)
+        {
+            return false;
+        }
+        try
+        {
+            var result = await core.ExecuteScriptAsync("history.length");
+            return int.TryParse(result, out var length) ? length <= 1 : !core.CanGoBack && !core.CanGoForward;
+        }
+        catch
+        {
+            return !core.CanGoBack && !core.CanGoForward;
+        }
+    }
+
+    /// <summary>在頁面的 DevTools console 印出警告（比照 Chrome 擋下 window.close() 時的訊息）。</summary>
+    public void ConsoleWarn(string message)
+    {
+        try
+        {
+            _ = Core?.ExecuteScriptAsync("console.warn(" + System.Text.Json.JsonSerializer.Serialize(message) + ")");
+        }
+        catch
+        {
+        }
+    }
+
     public event EventHandler<CoreWebView2NewWindowRequestedEventArgs>? NewWindowRequested;
+
+    /// <summary>網頁呼叫了 window.close()。</summary>
     public event EventHandler? CloseRequested;
     public event EventHandler<bool>? FullScreenChanged;
 

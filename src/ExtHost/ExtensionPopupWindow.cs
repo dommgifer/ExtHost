@@ -186,7 +186,14 @@ public sealed class ExtensionPopupWindow : Window
             var core = popup._webView.CoreWebView2;
             core.Settings.AreDevToolsEnabled = true;
             core.Settings.IsStatusBarEnabled = false;
-            core.WindowCloseRequested += (_, _) => popup.Close();
+            // popup 呼叫 window.close() 是正常行為（Chrome 允許）；延後關閉，避免在事件回呼中 Dispose WebView2
+            core.WindowCloseRequested += (_, _) => popup.Dispatcher.BeginInvoke(() =>
+            {
+                if (!popup._closing)
+                {
+                    popup.Close();
+                }
+            });
             core.NewWindowRequested += (_, e) =>
             {
                 // popup 裡的連結開到主視窗新分頁

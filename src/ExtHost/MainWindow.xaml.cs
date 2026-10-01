@@ -200,7 +200,8 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
 
         tab.PropertyChanged += Tab_PropertyChanged;
         tab.NewWindowRequested += OnNewWindowRequested;
-        tab.CloseRequested += (_, _) => CloseTab(tab);
+        // 不能在 WebView2 自己的事件回呼裡同步 Dispose 它（重入會導致程式崩潰），延後到事件結束後處理
+        tab.CloseRequested += (_, _) => Dispatcher.BeginInvoke(async () => await CloseTabFromPageAsync(tab));
         tab.FullScreenChanged += (_, full) =>
         {
             if (tab == SelectedTab)
@@ -315,6 +316,53 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
         }
     }
 
+    /// <summary>
+    /// 網頁執行 window.close() 時的處理：
+    /// 1. 比照 Chrome，只有腳本開啟或歷史紀錄只有一筆的分頁才會被關閉，其餘忽略並在 console 警告
+    /// 2. 只關閉該分頁，絕不因此關閉整個程式；若是最後一個分頁，先補開一個空白分頁
+    /// </summary>
+    private async Task CloseTabFromPageAsync(WebTab tab)
+    {
+        if (_isClosing || !_tabs.Contains(tab))
+        {
+            return;
+        }
+
+        try
+        {
+            if (!await tab.IsScriptClosableAsync())
+            {
+                tab.ConsoleWarn("Scripts may close only the windows that were opened by them. (ExtHost 已忽略 window.close())");
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            AppPaths.Log("判斷 window.close() 是否允許時失敗：" + ex.Message);
+            return;
+        }
+
+        if (!_tabs.Contains(tab))
+        {
+            return;
+        }
+
+        if (_tabs.Count == 1)
+        {
+            try
+            {
+                await CreateWebTabAsync(Settings.HomePage, select: true);
+            }
+            catch (Exception ex)
+            {
+                AppPaths.Log("補開分頁失敗，保留原分頁：" + ex.Message);
+                return;
+            }
+        }
+
+        CloseTab(tab);
+    }
+
     private async void OnNewWindowRequested(object? sender, CoreWebView2NewWindowRequestedEventArgs e)
     {
         var deferral = e.GetDeferral();
@@ -322,6 +370,7 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
         {
             var index = sender is TabBase src ? _tabs.IndexOf(src) + 1 : (int?)null;
             var tab = await CreateWebTabAsync(null, select: true, index: index);
+            tab.OpenedByScript = true; // 允許此分頁用 window.close() 關閉自己（同 Chrome）
             if (tab.Core != null)
             {
                 e.NewWindow = tab.Core;
