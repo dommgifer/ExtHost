@@ -61,6 +61,8 @@ public sealed class ExtensionItem : INotifyPropertyChanged
         }
     }
 
+    public bool HasSidePanel => IsInstalled && IsEnabled && Id != null && Manifest?.SidePanelPage != null;
+    public string? SidePanelUrl => HasSidePanel ? $"chrome-extension://{Id}/{Manifest!.SidePanelPage}" : null;
     public string? PopupUrl => HasPopup ? $"chrome-extension://{Id}/{Manifest!.PopupPage}" : null;
     public string? OptionsUrl => HasOptions ? $"chrome-extension://{Id}/{Manifest!.OptionsPage}" : null;
 
@@ -69,7 +71,11 @@ public sealed class ExtensionItem : INotifyPropertyChanged
         get
         {
             var t = $"{Name} {Version}";
-            if (!HasPopup)
+            if (!HasPopup && HasSidePanel)
+            {
+                t += "\n（點擊開啟側邊欄）";
+            }
+            else if (!HasPopup)
             {
                 t += "\n（沒有 popup，點擊開啟選單）";
             }

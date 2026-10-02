@@ -111,8 +111,21 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
         if (first.Core != null)
         {
             Extensions = new ExtensionManager(first.Core.Profile, Settings, Dispatcher);
-            Extensions.Changed += (_, _) => UpdateExtensionUi();
-            Extensions.Reloaded += (_, _) => OnExtensionsReloaded();
+            Extensions.Changed += (_, _) =>
+            {
+                UpdateExtensionUi();
+                SyncSidePanelWithExtensions();
+            };
+            Extensions.Reloaded += (_, _) =>
+            {
+                OnExtensionsReloaded();
+                if (SidePanel.IsOpen)
+                {
+                    SidePanel.Reload(); // 擴充功能重新載入後，舊的側邊欄頁面已失效
+                }
+            };
+            SidePanel.CloseRequested += (_, _) => CloseSidePanel();
+            SidePanel.OpenUrlRequested += (_, url) => OpenInNewTab(url);
             Extensions.Error += (_, msg) => ShowError(msg);
             ExtToolbar.ItemsSource = Extensions.ToolbarItems;
             try
@@ -689,10 +702,77 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
             {
                 ShowExtensionPopup(item, b);
             }
+            else if (item.HasSidePanel)
+            {
+                _ = ToggleSidePanelAsync(item);
+            }
             else
             {
                 ShowExtensionContextMenu(item, b);
             }
+        }
+    }
+
+    // ----- 擴充功能側邊欄 -----
+
+    private async Task ToggleSidePanelAsync(ExtensionItem item)
+    {
+        if (SidePanel.IsOpen && SidePanel.CurrentId == item.Id)
+        {
+            CloseSidePanel();
+            return;
+        }
+
+        SidePanelSplitterCol.Width = new GridLength(4);
+        SidePanelCol.Width = new GridLength(Math.Clamp(Settings.SidePanelWidth, 260, 900));
+        SidePanelSplitter.Visibility = Visibility.Visible;
+        SidePanel.Visibility = Visibility.Visible;
+
+        try
+        {
+            await SidePanel.ShowAsync(item);
+        }
+        catch (Exception ex)
+        {
+            AppPaths.Log("開啟側邊欄失敗：" + ex);
+            CloseSidePanel();
+            ShowError("無法開啟側邊欄：" + ExtensionManager.Describe(ex));
+        }
+    }
+
+    private void CloseSidePanel()
+    {
+        SidePanel.ClosePanel();
+        SidePanel.Visibility = Visibility.Collapsed;
+        SidePanelSplitter.Visibility = Visibility.Collapsed;
+        SidePanelSplitterCol.Width = new GridLength(0);
+        SidePanelCol.Width = new GridLength(0);
+    }
+
+    /// <summary>擴充功能被停用、移除或重新整理清單時，同步側邊欄狀態。</summary>
+    private void SyncSidePanelWithExtensions()
+    {
+        if (!SidePanel.IsOpen || Extensions == null)
+        {
+            return;
+        }
+        var current = Extensions.Items.FirstOrDefault(i => i.Id == SidePanel.CurrentId && i.HasSidePanel);
+        if (current == null)
+        {
+            CloseSidePanel();
+        }
+        else
+        {
+            SidePanel.UpdateItem(current);
+        }
+    }
+
+    private void SidePanelSplitter_DragCompleted(object sender, System.Windows.Controls.Primitives.DragCompletedEventArgs e)
+    {
+        if (SidePanelCol.ActualWidth > 0)
+        {
+            Settings.SidePanelWidth = Math.Round(SidePanelCol.ActualWidth);
+            Settings.Save();
         }
     }
 
@@ -713,6 +793,11 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
         if (item.HasPopup)
         {
             menu.Items.Add(MakeMenuItem("開啟 popup", () => ShowExtensionPopup(item, anchor)));
+        }
+        if (item.HasSidePanel)
+        {
+            var isOpen = SidePanel.IsOpen && SidePanel.CurrentId == item.Id;
+            menu.Items.Add(MakeMenuItem(isOpen ? "關閉側邊欄" : "開啟側邊欄", () => _ = ToggleSidePanelAsync(item)));
         }
         if (item.HasOptions)
         {
@@ -1283,6 +1368,11 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
         if (full)
         {
             _stateBeforeFullScreen = WindowState;
+            if (SidePanel.IsOpen)
+            {
+                SidePanelSplitterCol.Width = new GridLength(0);
+                SidePanelCol.Width = new GridLength(0);
+            }
             TabStripRowDef.Height = new GridLength(0);
             ToolbarRowDef.Height = new GridLength(0);
             StatusRowDef.Height = new GridLength(0);
@@ -1300,6 +1390,11 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
             TabStripRowDef.Height = new GridLength(44);
             ToolbarRowDef.Height = new GridLength(48);
             StatusRowDef.Height = new GridLength(26);
+            if (SidePanel.IsOpen)
+            {
+                SidePanelSplitterCol.Width = new GridLength(4);
+                SidePanelCol.Width = new GridLength(Math.Clamp(Settings.SidePanelWidth, 260, 900));
+            }
             WindowChrome.SetWindowChrome(this, new WindowChrome
             {
                 CaptionHeight = 44,
@@ -1358,6 +1453,7 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
         Settings.Save();
 
         ExtensionPopupWindow.Current?.Close();
+        SidePanel.ClosePanel();
         Extensions?.Shutdown();
 
         foreach (var t in _tabs.ToList())
