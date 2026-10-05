@@ -127,12 +127,25 @@ public sealed class ExtensionSidePanel : DockPanel
         }
 
         var core = webView.CoreWebView2;
-        var bridge = await ExtensionTabsBridge.InstallAsync(core, _activeTabUrl);
+        try
+        {
+            var bridge = await ExtensionTabsBridge.InstallAsync(core, _activeTabUrl);
+            if (generation != _generation)
+            {
+                return;
+            }
+            _tabsBridge = bridge;
+            // 安裝期間可能已切換分頁（當時 _tabsBridge 還是 null，SetActiveTabUrl 只記下網址），補同步最新的
+            await bridge.SetActiveTabUrlAsync(_activeTabUrl);
+        }
+        catch when (generation != _generation)
+        {
+            return; // 安裝期間面板已關閉（WebView2 已釋放）
+        }
         if (generation != _generation)
         {
             return;
         }
-        _tabsBridge = bridge;
         core.Settings.AreDevToolsEnabled = true;
         core.Settings.IsStatusBarEnabled = false;
         core.NewWindowRequested += (_, e) =>

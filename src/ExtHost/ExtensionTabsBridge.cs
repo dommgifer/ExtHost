@@ -14,74 +14,13 @@ namespace ExtHost;
 /// </summary>
 public sealed class ExtensionTabsBridge
 {
-    private const string Shim = """
-        (() => {
-          const tabs = globalThis.chrome && globalThis.chrome.tabs;
-          if (!tabs || typeof tabs.query !== 'function' || tabs.__exthostPatched) {
-            return;
-          }
-          const original = tabs.query.bind(tabs);
-          let activeUrl = null;
-          globalThis.__exthostSetActiveTabUrl = url => { activeUrl = url || null; };
-
-          const stripHash = u => (u || '').split('#')[0];
-          const urlOf = t => t.url || t.pendingUrl || '';
-          const findActive = list => {
-            if (!activeUrl) {
-              return null;
-            }
-            return list.find(t => urlOf(t) === activeUrl)
-              || list.find(t => stripHash(urlOf(t)) === stripHash(activeUrl))
-              || null;
-          };
-
-          async function query(info) {
-            info = info || {};
-            const wantsCurrent = info.currentWindow === true || info.lastFocusedWindow === true || info.windowId === -2;
-            if (!wantsCurrent) {
-              return original(info);
-            }
-            const rest = Object.assign({}, info);
-            delete rest.currentWindow;
-            delete rest.lastFocusedWindow;
-            delete rest.windowId;
-            delete rest.active;
-            const self = location.href;
-            const all = (await original(rest)).filter(t => urlOf(t) !== self);
-            const active = findActive(all);
-            const marked = all.map(t => Object.assign({}, t, { active: t === active, highlighted: t === active }));
-            if (info.active === true) {
-              return marked.filter(t => t.active);
-            }
-            if (info.active === false) {
-              return marked.filter(t => !t.active);
-            }
-            return marked;
-          }
-
-          const patched = function (info, callback) {
-            const p = query(info);
-            if (typeof callback === 'function') {
-              p.then(r => callback(r), e => { console.error(e); callback([]); });
-              return undefined;
-            }
-            return p;
-          };
-          try {
-            tabs.query = patched;
-          } catch (e) {
-          }
-          if (tabs.query !== patched) {
-            try {
-              Object.defineProperty(tabs, 'query', { value: patched, configurable: true, writable: true });
-            } catch (e) {
-              console.warn('[ExtHost] 無法改寫 chrome.tabs.query', e);
-              return;
-            }
-          }
-          tabs.__exthostPatched = true;
-        })();
-        """;
+    private static readonly Lazy<string> Shim = new(() =>
+    {
+        using var stream = typeof(ExtensionTabsBridge).Assembly.GetManifestResourceStream("ExtHost.Scripts.tabs-bridge.js")
+            ?? throw new InvalidOperationException("找不到內嵌資源 tabs-bridge.js");
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    });
 
     private readonly CoreWebView2 _core;
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -94,7 +33,7 @@ public sealed class ExtensionTabsBridge
     public static async Task<ExtensionTabsBridge> InstallAsync(CoreWebView2 core, string? activeUrl)
     {
         var bridge = new ExtensionTabsBridge(core);
-        await core.AddScriptToExecuteOnDocumentCreatedAsync(Shim);
+        await core.AddScriptToExecuteOnDocumentCreatedAsync(Shim.Value);
         await bridge.SetActiveTabUrlAsync(activeUrl);
         return bridge;
     }

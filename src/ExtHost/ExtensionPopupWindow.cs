@@ -28,6 +28,8 @@ public sealed class ExtensionPopupWindow : Window
     private double _anchorRight;
     private double _anchorTop;
     private bool _closing;
+    private ExtensionTabsBridge? _tabsBridge;
+    private string? _activeTabUrl;
 
     public static ExtensionPopupWindow? Current { get; private set; }
 
@@ -140,6 +142,18 @@ public sealed class ExtensionPopupWindow : Window
         };
     }
 
+    /// <summary>ExtHost 目前選取的分頁換了，或分頁網址變了（popup 釘選時仍可能切換分頁）。</summary>
+    public static void SetActiveTabUrl(string? url)
+    {
+        var popup = Current;
+        if (popup == null || popup._closing)
+        {
+            return;
+        }
+        popup._activeTabUrl = url;
+        _ = popup._tabsBridge?.SetActiveTabUrlAsync(url);
+    }
+
     /// <summary>在指定元素下方（右對齊）顯示 popup。</summary>
     public static async Task ShowForAsync(ExtensionItem item, FrameworkElement anchor, Window owner, string? activeTabUrl)
     {
@@ -165,7 +179,7 @@ public sealed class ExtensionPopupWindow : Window
             }
         }
 
-        var popup = new ExtensionPopupWindow(item) { Owner = owner };
+        var popup = new ExtensionPopupWindow(item) { Owner = owner, _activeTabUrl = activeTabUrl };
         Current = popup;
 
         var source = PresentationSource.FromVisual(anchor);
@@ -184,8 +198,14 @@ public sealed class ExtensionPopupWindow : Window
             var env = await BrowserEnvironment.GetAsync();
             await popup._webView.EnsureCoreWebView2Async(env);
             var core = popup._webView.CoreWebView2;
-            // popup 開著時不會切換分頁，開啟時的網址就夠了
-            await ExtensionTabsBridge.InstallAsync(core, activeTabUrl);
+            var bridge = await ExtensionTabsBridge.InstallAsync(core, popup._activeTabUrl);
+            if (popup._closing)
+            {
+                return;
+            }
+            popup._tabsBridge = bridge;
+            // 安裝期間可能已切換分頁（釘選時），補同步最新的
+            await bridge.SetActiveTabUrlAsync(popup._activeTabUrl);
             if (popup._closing)
             {
                 return;
