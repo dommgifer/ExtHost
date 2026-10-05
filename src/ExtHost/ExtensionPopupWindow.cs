@@ -141,7 +141,7 @@ public sealed class ExtensionPopupWindow : Window
     }
 
     /// <summary>在指定元素下方（右對齊）顯示 popup。</summary>
-    public static async Task ShowForAsync(ExtensionItem item, FrameworkElement anchor, Window owner)
+    public static async Task ShowForAsync(ExtensionItem item, FrameworkElement anchor, Window owner, string? activeTabUrl)
     {
         if (item.PopupUrl == null)
         {
@@ -184,6 +184,12 @@ public sealed class ExtensionPopupWindow : Window
             var env = await BrowserEnvironment.GetAsync();
             await popup._webView.EnsureCoreWebView2Async(env);
             var core = popup._webView.CoreWebView2;
+            // popup 開著時不會切換分頁，開啟時的網址就夠了
+            await ExtensionTabsBridge.InstallAsync(core, activeTabUrl);
+            if (popup._closing)
+            {
+                return;
+            }
             core.Settings.AreDevToolsEnabled = true;
             core.Settings.IsStatusBarEnabled = false;
             // popup 呼叫 window.close() 是正常行為（Chrome 允許）；延後關閉，避免在事件回呼中 Dispose WebView2
