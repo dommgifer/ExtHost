@@ -35,6 +35,7 @@
 
   <ItemGroup>
     <Resource Include="Assets\app.ico" />
+    <EmbeddedResource Include="Scripts\tabs-bridge.js" LogicalName="ExtHost.Scripts.tabs-bridge.js" />
   </ItemGroup>
 
   <!-- 不要把 WebView2 的 XML 文件檔複製到輸出資料夾 -->

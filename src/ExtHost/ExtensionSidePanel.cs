@@ -17,6 +17,8 @@ public sealed class ExtensionSidePanel : DockPanel
     private readonly Grid _host;
     private WebView2? _webView;
     private ExtensionItem? _item;
+    private ExtensionTabsBridge? _tabsBridge;
+    private string? _activeTabUrl;
     private int _generation;
 
     /// <summary>使用者按了關閉，或頁面呼叫了 window.close()。</summary>
@@ -89,6 +91,13 @@ public sealed class ExtensionSidePanel : DockPanel
         return b;
     }
 
+    /// <summary>ExtHost 目前選取的分頁網址，讓側邊欄的 chrome.tabs.query 找得到它。</summary>
+    public void SetActiveTabUrl(string? url)
+    {
+        _activeTabUrl = url;
+        _ = _tabsBridge?.SetActiveTabUrlAsync(url);
+    }
+
     /// <summary>顯示指定擴充功能的側邊欄（會取代目前顯示的）。呼叫前面板必須已經可見。</summary>
     public async Task ShowAsync(ExtensionItem item)
     {
@@ -118,6 +127,25 @@ public sealed class ExtensionSidePanel : DockPanel
         }
 
         var core = webView.CoreWebView2;
+        try
+        {
+            var bridge = await ExtensionTabsBridge.InstallAsync(core, _activeTabUrl);
+            if (generation != _generation)
+            {
+                return;
+            }
+            _tabsBridge = bridge;
+            // 安裝期間可能已切換分頁（當時 _tabsBridge 還是 null，SetActiveTabUrl 只記下網址），補同步最新的
+            await bridge.SetActiveTabUrlAsync(_activeTabUrl);
+        }
+        catch when (generation != _generation)
+        {
+            return; // 安裝期間面板已關閉（WebView2 已釋放）
+        }
+        if (generation != _generation)
+        {
+            return;
+        }
         core.Settings.AreDevToolsEnabled = true;
         core.Settings.IsStatusBarEnabled = false;
         core.NewWindowRequested += (_, e) =>
@@ -180,6 +208,7 @@ public sealed class ExtensionSidePanel : DockPanel
         }
         var old = _webView;
         _webView = null;
+        _tabsBridge = null;
         _host.Children.Remove(old);
         try
         {

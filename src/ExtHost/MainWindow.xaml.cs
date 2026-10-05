@@ -425,6 +425,7 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
 
         UpdateToolbar();
         HoverText.Text = "";
+        SyncActiveTabUrlToExtensions();
 
         if (selected != null)
         {
@@ -449,6 +450,10 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
         {
             HoverText.Text = w.StatusText;
             return;
+        }
+        if (e.PropertyName == nameof(TabBase.Url))
+        {
+            SyncActiveTabUrlToExtensions();
         }
         UpdateToolbar();
     }
@@ -700,7 +705,7 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
     {
         if (item.HasPopup)
         {
-            _ = ExtensionPopupWindow.ShowForAsync(item, anchor, this);
+            _ = ExtensionPopupWindow.ShowForAsync(item, anchor, this, ActiveWebUrl);
         }
     }
 
@@ -725,6 +730,17 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
 
     // ----- 擴充功能側邊欄 -----
 
+    /// <summary>目前分頁的網址（給擴充功能的 chrome.tabs.query 使用）；不是網頁分頁時為 null。</summary>
+    private string? ActiveWebUrl => SelectedTab is WebTab w && !UrlHelper.IsBlank(w.Url) ? w.Url : null;
+
+    /// <summary>把目前分頁網址同步給側邊欄與開著的 popup（含釘選中的）。</summary>
+    private void SyncActiveTabUrlToExtensions()
+    {
+        var url = ActiveWebUrl;
+        SidePanel.SetActiveTabUrl(url);
+        ExtensionPopupWindow.SetActiveTabUrl(url);
+    }
+
     private async Task ToggleSidePanelAsync(ExtensionItem item)
     {
         if (SidePanel.IsOpen && SidePanel.CurrentId == item.Id)
@@ -736,6 +752,7 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
         SidePanelSplitter.Visibility = Visibility.Visible;
         SidePanel.Visibility = Visibility.Visible;
         ApplySidePanelWidth(forceOpen: true);
+        SidePanel.SetActiveTabUrl(ActiveWebUrl);
 
         try
         {
