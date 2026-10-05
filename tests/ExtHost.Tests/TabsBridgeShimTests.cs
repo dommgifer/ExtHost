@@ -10,7 +10,7 @@ namespace ExtHost.Tests;
 public sealed class TabsBridgeShimTests
 {
     [Fact]
-    public void TabsQueryShim_PassesRegressionTests()
+    public async Task TabsQueryShim_PassesRegressionTests()
     {
         var dir = AppContext.BaseDirectory;
         var test = Path.Combine(dir, "TabsBridgeShim.test.js");
@@ -39,8 +39,9 @@ public sealed class TabsBridgeShimTests
         {
             var stdout = process.StandardOutput.ReadToEndAsync();
             var stderr = process.StandardError.ReadToEndAsync();
-            Assert.True(process.WaitForExit(60_000), "node 執行逾時");
-            Assert.True(process.ExitCode == 0, stdout.Result + stderr.Result);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+            await process.WaitForExitAsync(timeout.Token);
+            Assert.True(process.ExitCode == 0, await stdout + await stderr);
         }
     }
 }

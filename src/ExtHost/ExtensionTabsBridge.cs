@@ -1,3 +1,4 @@
+using System.IO;
 using System.Text.Json;
 using ExtHost.Services;
 using Microsoft.Web.WebView2.Core;
