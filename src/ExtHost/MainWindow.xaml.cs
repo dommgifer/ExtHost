@@ -48,6 +48,13 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
         Loaded += OnLoaded;
         Closing += OnClosing;
         StateChanged += (_, _) => UpdateMaximizeState();
+        SizeChanged += (_, e) =>
+        {
+            if (e.WidthChanged && SidePanel.IsOpen)
+            {
+                ApplySidePanelWidth();
+            }
+        };
         SourceInitialized += (_, _) =>
         {
             if (Settings.WindowMaximized)
@@ -772,8 +779,10 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
     private const double SidePanelSplitterWidth = 4;
 
     /// <summary>
-    /// 依儲存的寬度設定側邊欄欄寬，並限制在內容區可用寬度內
-    /// （扣掉內容欄 MinWidth 與分隔線），避免側邊欄右側的按鈕被擠出視窗。
+    /// 依儲存的寬度設定側邊欄欄寬，並限制在視窗可見寬度內
+    /// （扣掉外框、內容欄 MinWidth 與分隔線），避免側邊欄右側的按鈕被擠出視窗。
+    /// 不能用內容區的 ActualWidth 計算：欄寬總和超過可用空間時，WPF 會以未裁切的
+    /// DesiredSize 排版再裁切顯示，內容區與上層容器的 ActualWidth 都會被撐大；只有視窗本身的寬度受螢幕限制。
     /// </summary>
     private void ApplySidePanelWidth(bool forceOpen = false)
     {
@@ -784,21 +793,16 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
             return;
         }
         var width = Math.Clamp(Settings.SidePanelWidth, 260, 900);
-        if (ContentArea.ActualWidth > 0)
+        if (ActualWidth > 0)
         {
-            var available = ContentArea.ActualWidth - ContentCol.MinWidth - SidePanelSplitterWidth;
+            var visible = ActualWidth
+                - RootBorder.Margin.Left - RootBorder.Margin.Right
+                - RootBorder.BorderThickness.Left - RootBorder.BorderThickness.Right;
+            var available = visible - ContentCol.MinWidth - SidePanelSplitterWidth;
             width = Math.Min(width, Math.Max(0, available));
         }
         SidePanelSplitterCol.Width = new GridLength(SidePanelSplitterWidth);
         SidePanelCol.Width = new GridLength(width);
-    }
-
-    private void ContentArea_SizeChanged(object sender, SizeChangedEventArgs e)
-    {
-        if (e.WidthChanged && SidePanel.IsOpen)
-        {
-            ApplySidePanelWidth();
-        }
     }
 
     private void SidePanelSplitter_DragCompleted(object sender, System.Windows.Controls.Primitives.DragCompletedEventArgs e)
@@ -1389,6 +1393,10 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
             RootBorder.BorderThickness = new Thickness(1);
             MaxButton.Content = "";
             MaxButton.ToolTip = "最大化";
+        }
+        if (SidePanel.IsOpen)
+        {
+            ApplySidePanelWidth(); // 外框邊距改變，可見寬度跟著變
         }
     }
 
