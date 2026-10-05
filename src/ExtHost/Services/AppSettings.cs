@@ -41,6 +41,9 @@ public sealed class AppSettings
     /// <summary>啟動時還原上次開啟的分頁。</summary>
     public bool RestoreSession { get; set; } = true;
 
+    /// <summary>擴充功能側邊欄寬度。</summary>
+    public double SidePanelWidth { get; set; } = 400;
+
     public List<string> LastSession { get; set; } = new();
 
     /// <summary>一律顯示書籤列（Ctrl+Shift+B）。關閉時與 Chrome 相同，只在新分頁顯示。</summary>

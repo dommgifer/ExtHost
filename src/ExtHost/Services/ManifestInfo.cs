@@ -14,6 +14,12 @@ public sealed class ManifestInfo
     public int ManifestVersion { get; private set; }
     public string? PopupPage { get; private set; }
     public string? OptionsPage { get; private set; }
+
+    /// <summary>側邊欄頁面（manifest 的 side_panel.default_path）。</summary>
+    public string? SidePanelPage { get; private set; }
+
+    /// <summary>側邊欄頁面是不是由常見檔名推測出來的（manifest 沒寫 default_path）。</summary>
+    public bool SidePanelGuessed { get; private set; }
     public string? IconFile { get; private set; }
     public bool HasAction { get; private set; }
     public List<string> Permissions { get; } = new();
@@ -149,6 +155,27 @@ public sealed class ManifestInfo
                 }
             }
 
+            // 側邊欄：WebView2 沒有 Side Panel UI，由 ExtHost 在主視窗右側代管
+            if (root.TryGetProperty("side_panel", out var sidePanel) && sidePanel.ValueKind == JsonValueKind.Object)
+            {
+                info.SidePanelPage = GetString(sidePanel, "default_path")?.TrimStart('/');
+            }
+            if (info.SidePanelPage == null
+                && (root.TryGetProperty("side_panel", out _) || info.Permissions.Any(x => x.Equals("sidePanel", StringComparison.OrdinalIgnoreCase))))
+            {
+                // 沒寫 default_path（改用 chrome.sidePanel.setOptions 動態指定）時，試著找常見檔名
+                foreach (var guess in new[] { "sidepanel.html", "side_panel.html", "sidebar.html", "panel.html",
+                                              "sidepanel/index.html", "side_panel/index.html", "src/sidepanel/index.html" })
+                {
+                    if (File.Exists(Path.Combine(folder, guess.Replace('/', Path.DirectorySeparatorChar))))
+                    {
+                        info.SidePanelPage = guess;
+                        info.SidePanelGuessed = true;
+                        break;
+                    }
+                }
+            }
+
             if (root.TryGetProperty("content_scripts", out var cs) && cs.ValueKind == JsonValueKind.Array)
             {
                 foreach (var entry in cs.EnumerateArray())
@@ -209,12 +236,20 @@ public sealed class ManifestInfo
         {
             chips.Add(PopupPage != null
                 ? new CompatChip("popup（由工具列代管）", false, "點工具列按鈕會開啟 popup 視窗")
-                : new CompatChip("action.onClicked", true, "沒有 default_popup：WebView2 無法觸發 action.onClicked，工具列按鈕只會顯示選單"));
+                : SidePanelPage != null
+                    ? new CompatChip("側邊欄（由 ExtHost 代管）", false,
+                        "點工具列按鈕會在主視窗右側開啟側邊欄：" + SidePanelPage + (SidePanelGuessed ? "（manifest 沒寫 default_path，依檔名推測）" : ""))
+                    : new CompatChip("action.onClicked", true, "沒有 default_popup：WebView2 無法觸發 action.onClicked，工具列按鈕只會顯示選單"));
         }
 
         foreach (var p in Permissions.Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            if (RiskyPermissions.TryGetValue(p, out var why))
+            if (p.Equals("sidePanel", StringComparison.OrdinalIgnoreCase) && SidePanelPage != null)
+            {
+                chips.Add(new CompatChip("sidePanel · 需實測", true,
+                    "側邊欄頁面由 ExtHost 代管；chrome.sidePanel.open / setOptions 等 API 在 WebView2 中可能無效"));
+            }
+            else if (RiskyPermissions.TryGetValue(p, out var why))
             {
                 chips.Add(new CompatChip(p + " · 需實測", true, why));
             }
@@ -230,6 +265,10 @@ public sealed class ManifestInfo
 
         foreach (var key in ManifestKeys)
         {
+            if (key.Equals("side_panel", StringComparison.OrdinalIgnoreCase) && SidePanelPage != null)
+            {
+                continue; // 已在上方標示為由 ExtHost 代管
+            }
             if (RiskyKeys.TryGetValue(key, out var why))
             {
                 chips.Add(new CompatChip(key + " · 需實測", true, why));

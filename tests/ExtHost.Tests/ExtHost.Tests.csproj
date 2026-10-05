@@ -17,6 +17,8 @@
   <ItemGroup>
     <Compile Include="..\..\src\ExtHost\Services\AppPaths.cs" Link="Linked\AppPaths.cs" />
     <Compile Include="..\..\src\ExtHost\Services\UrlHelper.cs" Link="Linked\UrlHelper.cs" />
+    <Compile Include="..\..\src\ExtHost\Services\ManifestInfo.cs" Link="Linked\ManifestInfo.cs" />
+    <Compile Include="..\..\src\ExtHost\Services\MatchPattern.cs" Link="Linked\MatchPattern.cs" />
     <Compile Include="..\..\src\ExtHost\Services\BookmarkStore.cs" Link="Linked\BookmarkStore.cs" />
     <Compile Include="..\..\src\ExtHost\Services\BookmarkImporter.cs" Link="Linked\BookmarkImporter.cs" />
     <Compile Include="..\..\src\ExtHost\Services\BookmarkExporter.cs" Link="Linked\BookmarkExporter.cs" />

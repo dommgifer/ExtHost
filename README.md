@@ -54,6 +54,7 @@ WebView2 只提供擴充功能的執行環境，沒有 Chrome 的瀏覽器介面
 
 - **popup**：由 ExtHost 工具列代為開啟，需要在 manifest 設定 `action.default_popup`
 - **沒有 popup 的 `action.onClicked`**：無法觸發，點工具列按鈕只會出現選單
+- **側邊欄（Side Panel）**：WebView2 沒有側邊欄，ExtHost 會讀取 manifest 的 `side_panel.default_path`，點工具列按鈕時在主視窗右側開啟（可拖曳調整寬度，切換分頁時保持開啟）。沒寫 `default_path` 的擴充功能會嘗試找 `sidepanel.html` 等常見檔名。`chrome.sidePanel.open()`、`setOptions()` 等 API 可能無效；側邊欄頁面若依賴 `chrome.tabs.query()` 取得目前分頁，也需要實測
 - **依賴瀏覽器介面的 API**（`contextMenus`、`sidePanel`、`commands`、`tabs` 的部分功能等）：可能無法使用。管理頁會把這類權限標成橘色「需實測」，但這只是依權限名稱標示，實際能不能用還是要測
 - `window.close()`：比照 Chrome，只有「由腳本開啟的分頁」或「歷史紀錄只有一筆的分頁」會被關閉，其他情況會忽略並在 DevTools console 印出警告。網頁關閉最後一個分頁時，ExtHost 會先補開一個新分頁，不會整個程式關掉
 - `chrome.runtime.openOptionsPage()` 可能無效，建議改用 `window.open(chrome.runtime.getURL('options.html'))`，ExtHost 會開成新分頁

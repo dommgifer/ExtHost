@@ -48,6 +48,13 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
         Loaded += OnLoaded;
         Closing += OnClosing;
         StateChanged += (_, _) => UpdateMaximizeState();
+        SizeChanged += (_, e) =>
+        {
+            if (e.WidthChanged && SidePanel.IsOpen)
+            {
+                ApplySidePanelWidth();
+            }
+        };
         SourceInitialized += (_, _) =>
         {
             if (Settings.WindowMaximized)
@@ -111,8 +118,24 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
         if (first.Core != null)
         {
             Extensions = new ExtensionManager(first.Core.Profile, Settings, Dispatcher);
-            Extensions.Changed += (_, _) => UpdateExtensionUi();
-            Extensions.Reloaded += (_, _) => OnExtensionsReloaded();
+            Extensions.Changed += (_, _) =>
+            {
+                UpdateExtensionUi();
+                SyncSidePanelWithExtensions();
+            };
+            Extensions.Reloaded += (_, e) =>
+            {
+                OnExtensionsReloaded();
+                // 只有側邊欄所屬的擴充功能被重新載入時，舊頁面的 context 才會失效；
+                // 其他擴充功能重新載入時不刷新，避免清掉側邊欄的輸入與捲動位置
+                var path = SidePanel.CurrentPath;
+                if (SidePanel.IsOpen && path != null && e.Paths.Contains(path, StringComparer.OrdinalIgnoreCase))
+                {
+                    SidePanel.Reload();
+                }
+            };
+            SidePanel.CloseRequested += (_, _) => CloseSidePanel();
+            SidePanel.OpenUrlRequested += (_, url) => OpenInNewTab(url);
             Extensions.Error += (_, msg) => ShowError(msg);
             ExtToolbar.ItemsSource = Extensions.ToolbarItems;
             try
@@ -689,10 +712,105 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
             {
                 ShowExtensionPopup(item, b);
             }
+            else if (item.HasSidePanel)
+            {
+                _ = ToggleSidePanelAsync(item);
+            }
             else
             {
                 ShowExtensionContextMenu(item, b);
             }
+        }
+    }
+
+    // ----- 擴充功能側邊欄 -----
+
+    private async Task ToggleSidePanelAsync(ExtensionItem item)
+    {
+        if (SidePanel.IsOpen && SidePanel.CurrentId == item.Id)
+        {
+            CloseSidePanel();
+            return;
+        }
+
+        SidePanelSplitter.Visibility = Visibility.Visible;
+        SidePanel.Visibility = Visibility.Visible;
+        ApplySidePanelWidth(forceOpen: true);
+
+        try
+        {
+            await SidePanel.ShowAsync(item);
+        }
+        catch (Exception ex)
+        {
+            AppPaths.Log("開啟側邊欄失敗：" + ex);
+            CloseSidePanel();
+            ShowError("無法開啟側邊欄：" + ExtensionManager.Describe(ex));
+        }
+    }
+
+    private void CloseSidePanel()
+    {
+        SidePanel.ClosePanel();
+        SidePanel.Visibility = Visibility.Collapsed;
+        SidePanelSplitter.Visibility = Visibility.Collapsed;
+        SidePanelSplitterCol.Width = new GridLength(0);
+        SidePanelCol.Width = new GridLength(0);
+    }
+
+    /// <summary>擴充功能被停用、移除或重新整理清單時，同步側邊欄狀態。</summary>
+    private void SyncSidePanelWithExtensions()
+    {
+        if (!SidePanel.IsOpen || Extensions == null)
+        {
+            return;
+        }
+        var current = Extensions.Items.FirstOrDefault(i => i.Id == SidePanel.CurrentId && i.HasSidePanel);
+        if (current == null)
+        {
+            CloseSidePanel();
+        }
+        else
+        {
+            SidePanel.UpdateItem(current);
+        }
+    }
+
+    private const double SidePanelSplitterWidth = 4;
+
+    /// <summary>
+    /// 依儲存的寬度設定側邊欄欄寬，並限制在視窗可見寬度內
+    /// （扣掉外框、內容欄 MinWidth 與分隔線），避免側邊欄右側的按鈕被擠出視窗。
+    /// 不能用內容區的 ActualWidth 計算：欄寬總和超過可用空間時，WPF 會以未裁切的
+    /// DesiredSize 排版再裁切顯示，內容區與上層容器的 ActualWidth 都會被撐大；只有視窗本身的寬度受螢幕限制。
+    /// </summary>
+    private void ApplySidePanelWidth(bool forceOpen = false)
+    {
+        if ((!SidePanel.IsOpen && !forceOpen) || _isFullScreen)
+        {
+            SidePanelSplitterCol.Width = new GridLength(0);
+            SidePanelCol.Width = new GridLength(0);
+            return;
+        }
+        var width = Math.Clamp(Settings.SidePanelWidth, 260, 900);
+        if (ActualWidth > 0)
+        {
+            var visible = ActualWidth
+                - RootBorder.Margin.Left - RootBorder.Margin.Right
+                - RootBorder.BorderThickness.Left - RootBorder.BorderThickness.Right;
+            var available = visible - ContentCol.MinWidth - SidePanelSplitterWidth;
+            width = Math.Min(width, Math.Max(0, available));
+        }
+        SidePanelSplitterCol.Width = new GridLength(SidePanelSplitterWidth);
+        SidePanelCol.Width = new GridLength(width);
+    }
+
+    private void SidePanelSplitter_DragCompleted(object sender, System.Windows.Controls.Primitives.DragCompletedEventArgs e)
+    {
+        if (SidePanelCol.ActualWidth > 0)
+        {
+            Settings.SidePanelWidth = Math.Round(SidePanelCol.ActualWidth);
+            Settings.Save();
         }
     }
 
@@ -713,6 +831,11 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
         if (item.HasPopup)
         {
             menu.Items.Add(MakeMenuItem("開啟 popup", () => ShowExtensionPopup(item, anchor)));
+        }
+        if (item.HasSidePanel)
+        {
+            var isOpen = SidePanel.IsOpen && SidePanel.CurrentId == item.Id;
+            menu.Items.Add(MakeMenuItem(isOpen ? "關閉側邊欄" : "開啟側邊欄", () => _ = ToggleSidePanelAsync(item)));
         }
         if (item.HasOptions)
         {
@@ -1271,6 +1394,10 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
             MaxButton.Content = "";
             MaxButton.ToolTip = "最大化";
         }
+        if (SidePanel.IsOpen)
+        {
+            ApplySidePanelWidth(); // 外框邊距改變，可見寬度跟著變
+        }
     }
 
     private void SetFullScreen(bool full)
@@ -1283,6 +1410,7 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
         if (full)
         {
             _stateBeforeFullScreen = WindowState;
+            ApplySidePanelWidth();
             TabStripRowDef.Height = new GridLength(0);
             ToolbarRowDef.Height = new GridLength(0);
             StatusRowDef.Height = new GridLength(0);
@@ -1300,6 +1428,7 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
             TabStripRowDef.Height = new GridLength(44);
             ToolbarRowDef.Height = new GridLength(48);
             StatusRowDef.Height = new GridLength(26);
+            ApplySidePanelWidth();
             WindowChrome.SetWindowChrome(this, new WindowChrome
             {
                 CaptionHeight = 44,
@@ -1358,6 +1487,7 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
         Settings.Save();
 
         ExtensionPopupWindow.Current?.Close();
+        SidePanel.ClosePanel();
         Extensions?.Shutdown();
 
         foreach (var t in _tabs.ToList())

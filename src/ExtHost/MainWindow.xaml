@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:c="clr-namespace:ExtHost.Controls"
         xmlns:b="clr-namespace:ExtHost.Bookmarks"
+        xmlns:local="clr-namespace:ExtHost"
         Title="ExtHost"
         Icon="Assets/app.ico"
         Width="1280" Height="820" MinWidth="640" MinHeight="400"
@@ -218,7 +219,20 @@
             <b:BookmarkBar x:Name="BookmarkBarControl" Grid.Row="2" Visibility="Collapsed" />
 
             <!-- ===== 內容 ===== -->
-            <Grid x:Name="ContentHost" Grid.Row="3" Background="White" />
+            <Grid Grid.Row="3">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition x:Name="ContentCol" Width="*" MinWidth="240" />
+                    <ColumnDefinition x:Name="SidePanelSplitterCol" Width="0" />
+                    <ColumnDefinition x:Name="SidePanelCol" Width="0" />
+                </Grid.ColumnDefinitions>
+                <Grid x:Name="ContentHost" Background="White" />
+                <!-- 擴充功能側邊欄（WebView2 沒有 Side Panel UI，由 ExtHost 代管） -->
+                <GridSplitter x:Name="SidePanelSplitter" Grid.Column="1" Width="4" HorizontalAlignment="Stretch"
+                              ResizeBehavior="PreviousAndNext" ResizeDirection="Columns" ShowsPreview="False"
+                              Background="{StaticResource BorderBrush}" Visibility="Collapsed"
+                              DragCompleted="SidePanelSplitter_DragCompleted" />
+                <local:ExtensionSidePanel x:Name="SidePanel" Grid.Column="2" Visibility="Collapsed" />
+            </Grid>
 
             <!-- ===== 狀態列 ===== -->
             <Border Grid.Row="4" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0">

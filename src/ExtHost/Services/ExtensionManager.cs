@@ -29,7 +29,7 @@ public sealed class ExtensionManager
     public event EventHandler? Changed;
 
     /// <summary>有擴充功能被重新載入（開發模式下可用來重新整理分頁）。</summary>
-    public event EventHandler? Reloaded;
+    public event EventHandler<ExtensionsReloadedEventArgs>? Reloaded;
 
     /// <summary>非同步作業發生錯誤，需通知使用者。</summary>
     public event EventHandler<string>? Error;
@@ -181,12 +181,14 @@ public sealed class ExtensionManager
 
     public async Task ReloadAllAsync()
     {
+        var paths = new List<string>();
         await _gate.WaitAsync();
         try
         {
             foreach (var reg in _settings.Extensions.ToList())
             {
                 await ReloadCoreAsync(reg);
+                paths.Add(reg.Path);
             }
             _settings.Save();
             await RefreshCoreAsync();
@@ -195,7 +197,7 @@ public sealed class ExtensionManager
         {
             _gate.Release();
         }
-        Reloaded?.Invoke(this, EventArgs.Empty);
+        Reloaded?.Invoke(this, new ExtensionsReloadedEventArgs(paths));
     }
 
     public async Task RemoveAsync(ExtensionItem item)
@@ -328,6 +330,7 @@ public sealed class ExtensionManager
 
     private async Task ReloadPathAsync(string path)
     {
+        var paths = new List<string>();
         await _gate.WaitAsync();
         try
         {
@@ -337,6 +340,7 @@ public sealed class ExtensionManager
                 return;
             }
             await ReloadCoreAsync(reg);
+            paths.Add(reg.Path);
             _settings.Save();
             await RefreshCoreAsync();
         }
@@ -344,7 +348,7 @@ public sealed class ExtensionManager
         {
             _gate.Release();
         }
-        Reloaded?.Invoke(this, EventArgs.Empty);
+        Reloaded?.Invoke(this, new ExtensionsReloadedEventArgs(paths));
     }
 
     private async Task ReloadCoreAsync(RegisteredExtension reg)
@@ -536,4 +540,10 @@ public sealed class ExtensionManager
         }
         return msg;
     }
+}
+
+/// <summary>重新載入完成；Paths 為這次被重新載入的擴充功能資料夾。</summary>
+public sealed class ExtensionsReloadedEventArgs(IReadOnlyList<string> paths) : EventArgs
+{
+    public IReadOnlyList<string> Paths { get; } = paths;
 }
