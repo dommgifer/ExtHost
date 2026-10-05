@@ -29,6 +29,9 @@ public sealed class ExtensionSidePanel : DockPanel
 
     public string? CurrentId => _item?.Id;
 
+    /// <summary>目前側邊欄所屬擴充功能的資料夾（不是由 ExtHost 載入的為 null）。</summary>
+    public string? CurrentPath => _item?.Path;
+
     public ExtensionSidePanel()
     {
         LastChildFill = true;

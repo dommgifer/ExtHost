@@ -219,9 +219,9 @@
             <b:BookmarkBar x:Name="BookmarkBarControl" Grid.Row="2" Visibility="Collapsed" />
 
             <!-- ===== 內容 ===== -->
-            <Grid Grid.Row="3">
+            <Grid x:Name="ContentArea" Grid.Row="3" SizeChanged="ContentArea_SizeChanged">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" MinWidth="240" />
+                    <ColumnDefinition x:Name="ContentCol" Width="*" MinWidth="240" />
                     <ColumnDefinition x:Name="SidePanelSplitterCol" Width="0" />
                     <ColumnDefinition x:Name="SidePanelCol" Width="0" />
                 </Grid.ColumnDefinitions>

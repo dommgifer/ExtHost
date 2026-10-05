@@ -116,12 +116,15 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
                 UpdateExtensionUi();
                 SyncSidePanelWithExtensions();
             };
-            Extensions.Reloaded += (_, _) =>
+            Extensions.Reloaded += (_, e) =>
             {
                 OnExtensionsReloaded();
-                if (SidePanel.IsOpen)
+                // 只有側邊欄所屬的擴充功能被重新載入時，舊頁面的 context 才會失效；
+                // 其他擴充功能重新載入時不刷新，避免清掉側邊欄的輸入與捲動位置
+                var path = SidePanel.CurrentPath;
+                if (SidePanel.IsOpen && path != null && e.Paths.Contains(path, StringComparer.OrdinalIgnoreCase))
                 {
-                    SidePanel.Reload(); // 擴充功能重新載入後，舊的側邊欄頁面已失效
+                    SidePanel.Reload();
                 }
             };
             SidePanel.CloseRequested += (_, _) => CloseSidePanel();
@@ -723,10 +726,9 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
             return;
         }
 
-        SidePanelSplitterCol.Width = new GridLength(4);
-        SidePanelCol.Width = new GridLength(Math.Clamp(Settings.SidePanelWidth, 260, 900));
         SidePanelSplitter.Visibility = Visibility.Visible;
         SidePanel.Visibility = Visibility.Visible;
+        ApplySidePanelWidth(forceOpen: true);
 
         try
         {
@@ -764,6 +766,38 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
         else
         {
             SidePanel.UpdateItem(current);
+        }
+    }
+
+    private const double SidePanelSplitterWidth = 4;
+
+    /// <summary>
+    /// 依儲存的寬度設定側邊欄欄寬，並限制在內容區可用寬度內
+    /// （扣掉內容欄 MinWidth 與分隔線），避免側邊欄右側的按鈕被擠出視窗。
+    /// </summary>
+    private void ApplySidePanelWidth(bool forceOpen = false)
+    {
+        if ((!SidePanel.IsOpen && !forceOpen) || _isFullScreen)
+        {
+            SidePanelSplitterCol.Width = new GridLength(0);
+            SidePanelCol.Width = new GridLength(0);
+            return;
+        }
+        var width = Math.Clamp(Settings.SidePanelWidth, 260, 900);
+        if (ContentArea.ActualWidth > 0)
+        {
+            var available = ContentArea.ActualWidth - ContentCol.MinWidth - SidePanelSplitterWidth;
+            width = Math.Min(width, Math.Max(0, available));
+        }
+        SidePanelSplitterCol.Width = new GridLength(SidePanelSplitterWidth);
+        SidePanelCol.Width = new GridLength(width);
+    }
+
+    private void ContentArea_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (e.WidthChanged && SidePanel.IsOpen)
+        {
+            ApplySidePanelWidth();
         }
     }
 
@@ -1368,11 +1402,7 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
         if (full)
         {
             _stateBeforeFullScreen = WindowState;
-            if (SidePanel.IsOpen)
-            {
-                SidePanelSplitterCol.Width = new GridLength(0);
-                SidePanelCol.Width = new GridLength(0);
-            }
+            ApplySidePanelWidth();
             TabStripRowDef.Height = new GridLength(0);
             ToolbarRowDef.Height = new GridLength(0);
             StatusRowDef.Height = new GridLength(0);
@@ -1390,11 +1420,7 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
             TabStripRowDef.Height = new GridLength(44);
             ToolbarRowDef.Height = new GridLength(48);
             StatusRowDef.Height = new GridLength(26);
-            if (SidePanel.IsOpen)
-            {
-                SidePanelSplitterCol.Width = new GridLength(4);
-                SidePanelCol.Width = new GridLength(Math.Clamp(Settings.SidePanelWidth, 260, 900));
-            }
+            ApplySidePanelWidth();
             WindowChrome.SetWindowChrome(this, new WindowChrome
             {
                 CaptionHeight = 44,
