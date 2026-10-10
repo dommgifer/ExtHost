@@ -319,7 +319,7 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
         }
 
         var wasSelected = SelectedTab == tab;
-        AppPaths.Log($"關閉分頁：{tab.Url}（關閉後剩 {_tabs.Count - 1} 個）");
+        AppPaths.Log($"關閉分頁：{UrlHelper.ForLog(tab.Url)}（關閉後剩 {_tabs.Count - 1} 個）");
         tab.PropertyChanged -= Tab_PropertyChanged;
         _tabs.RemoveAt(index);
         ContentHost.Children.Remove(tab.View);
@@ -348,7 +348,7 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
     /// </summary>
     private async Task CloseTabFromPageAsync(WebTab tab)
     {
-        AppPaths.Log($"網頁要求關閉分頁（window.close）：{tab.Url}，腳本開啟：{tab.OpenedByScript}，目前 {_tabs.Count} 個分頁");
+        AppPaths.Log($"網頁要求關閉分頁（window.close）：{UrlHelper.ForLog(tab.Url)}，腳本開啟：{tab.OpenedByScript}，目前 {_tabs.Count} 個分頁");
         if (_isClosing || !_tabs.Contains(tab))
         {
             return;
@@ -392,7 +392,7 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
     private async void OnNewWindowRequested(object? sender, CoreWebView2NewWindowRequestedEventArgs e)
     {
         var deferral = e.GetDeferral();
-        AppPaths.Log($"網頁開新視窗：{e.Uri}（來源 {(sender as TabBase)?.Url}，使用者觸發：{e.IsUserInitiated}）");
+        AppPaths.Log($"網頁開新視窗：{UrlHelper.ForLog(e.Uri)}（來源 {UrlHelper.ForLog((sender as TabBase)?.Url)}，使用者觸發：{e.IsUserInitiated}）");
         try
         {
             var index = sender is TabBase src ? _tabs.IndexOf(src) + 1 : (int?)null;

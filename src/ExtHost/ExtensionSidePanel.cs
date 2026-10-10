@@ -116,6 +116,7 @@ public sealed class ExtensionSidePanel : DockPanel
         {
             var env = await BrowserEnvironment.GetAsync();
             await webView.EnsureCoreWebView2Async(env);
+            WebView2CloseGuard.DetachDefaultHandler(webView);
         }
         catch when (generation != _generation)
         {
