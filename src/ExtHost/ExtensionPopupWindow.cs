@@ -197,6 +197,7 @@ public sealed class ExtensionPopupWindow : Window
         {
             var env = await BrowserEnvironment.GetAsync();
             await popup._webView.EnsureCoreWebView2Async(env);
+            WebView2CloseGuard.DetachDefaultHandler(popup._webView);
             var core = popup._webView.CoreWebView2;
             var bridge = await ExtensionTabsBridge.InstallAsync(core, popup._activeTabUrl);
             if (popup._closing)

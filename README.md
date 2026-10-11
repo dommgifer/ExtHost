@@ -57,7 +57,7 @@ WebView2 只提供擴充功能的執行環境，沒有 Chrome 的瀏覽器介面
 - **側邊欄（Side Panel）**：WebView2 沒有側邊欄，ExtHost 會讀取 manifest 的 `side_panel.default_path`，點工具列按鈕時在主視窗右側開啟（可拖曳調整寬度，切換分頁時保持開啟）。沒寫 `default_path` 的擴充功能會嘗試找 `sidepanel.html` 等常見檔名。`chrome.sidePanel.open()`、`setOptions()` 等 API 可能無效
 - **`chrome.tabs.query()` 的「目前分頁」**：WebView2 把每個 WebView2 當成獨立視窗，popup 和側邊欄用 `{ active: true, currentWindow: true }` 查詢時會拿到自己。ExtHost 會在 popup 和側邊欄裡改寫這類查詢（含 `lastFocusedWindow`），改回傳網址等於 ExtHost 目前分頁的那個分頁（分頁 id 是真的，可以接著用 `chrome.scripting.executeScript`）。兩個分頁網址完全相同時可能挑錯；background service worker 裡的查詢不受影響
 - **依賴瀏覽器介面的 API**（`contextMenus`、`sidePanel`、`commands`、`tabs` 的部分功能等）：可能無法使用。管理頁會把這類權限標成橘色「需實測」，但這只是依權限名稱標示，實際能不能用還是要測
-- `window.close()`：比照 Chrome，只有「由腳本開啟的分頁」或「歷史紀錄只有一筆的分頁」會被關閉，其他情況會忽略並在 DevTools console 印出警告。網頁關閉最後一個分頁時，ExtHost 會先補開一個新分頁，不會整個程式關掉
+- `window.close()`：比照 Chrome，只有「由腳本開啟的分頁」或「歷史紀錄只有一筆的分頁」會被關閉，其他情況會忽略並在 DevTools console 印出警告。網頁關閉最後一個分頁時，ExtHost 會先補開一個新分頁，不會整個程式關掉。（WPF 的 WebView2 控制項預設會在 `window.close()` 時直接關閉整個視窗，ExtHost 會移除這個預設處理；例如 Microsoft 登入（MSAL）關閉登入分頁時，以前會連 ExtHost 一起關掉）
 - `chrome.runtime.openOptionsPage()` 可能無效，建議改用 `window.open(chrome.runtime.getURL('options.html'))`，ExtHost 會開成新分頁
 - **重新載入方式**：預設是「移除後重新加入」，一定會讀到新檔案，但**該擴充功能的 `chrome.storage` 資料可能被清除**。如果要保留資料，把 `settings.json` 的 `ReloadMode` 改成 `"toggle"`（停用再啟用），但部分修改可能不會生效
 

@@ -319,6 +319,7 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
         }
 
         var wasSelected = SelectedTab == tab;
+        AppPaths.Log($"關閉分頁：{UrlHelper.ForLog(tab.Url)}（關閉後剩 {_tabs.Count - 1} 個）");
         tab.PropertyChanged -= Tab_PropertyChanged;
         _tabs.RemoveAt(index);
         ContentHost.Children.Remove(tab.View);
@@ -328,6 +329,7 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
         {
             if (!_isClosing)
             {
+                AppPaths.Log("最後一個分頁已關閉，關閉主視窗");
                 Close();
             }
             return;
@@ -346,6 +348,7 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
     /// </summary>
     private async Task CloseTabFromPageAsync(WebTab tab)
     {
+        AppPaths.Log($"網頁要求關閉分頁（window.close）：{UrlHelper.ForLog(tab.Url)}，腳本開啟：{tab.OpenedByScript}，目前 {_tabs.Count} 個分頁");
         if (_isClosing || !_tabs.Contains(tab))
         {
             return;
@@ -389,6 +392,7 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
     private async void OnNewWindowRequested(object? sender, CoreWebView2NewWindowRequestedEventArgs e)
     {
         var deferral = e.GetDeferral();
+        AppPaths.Log($"網頁開新視窗：{UrlHelper.ForLog(e.Uri)}（來源 {UrlHelper.ForLog((sender as TabBase)?.Url)}，使用者觸發：{e.IsUserInitiated}）");
         try
         {
             var index = sender is TabBase src ? _tabs.IndexOf(src) + 1 : (int?)null;
@@ -1484,6 +1488,11 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
     private void OnClosing(object? sender, CancelEventArgs e)
     {
         _isClosing = true;
+        // 診斷用：正常關閉只記一行；若是 WebView2 觸發的（例如內建的 window.close() 處理沒移除成功）才附上呼叫堆疊
+        var stack = Environment.StackTrace;
+        AppPaths.Log(stack.Contains("Microsoft.Web.WebView2", StringComparison.Ordinal)
+            ? $"主視窗被 WebView2 關閉（剩 {_tabs.Count} 個分頁），這不是預期的行為：\n{stack}"
+            : $"主視窗關閉（剩 {_tabs.Count} 個分頁）");
 
         // 儲存分頁
         Settings.LastSession = _tabs

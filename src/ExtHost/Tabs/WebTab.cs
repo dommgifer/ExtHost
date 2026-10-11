@@ -101,6 +101,7 @@ public sealed class WebTab : TabBase
     public async Task InitializeAsync(CoreWebView2Environment env)
     {
         await _webView.EnsureCoreWebView2Async(env);
+        WebView2CloseGuard.DetachDefaultHandler(_webView);
         var core = _webView.CoreWebView2;
 
         core.Settings.IsStatusBarEnabled = false;

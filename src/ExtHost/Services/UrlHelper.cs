@@ -9,6 +9,19 @@ public static class UrlHelper
 
     public const string BookmarksPageUrl = "exthost://bookmarks";
 
+    /// <summary>
+    /// 寫入紀錄用的網址：去掉查詢參數與 # 之後的內容（可能含有 OAuth 授權碼、權杖等敏感資料）。
+    /// </summary>
+    public static string ForLog(string? url)
+    {
+        if (string.IsNullOrEmpty(url))
+        {
+            return "";
+        }
+        var cut = url.IndexOfAny(new[] { '?', '#' });
+        return cut < 0 ? url : url[..cut] + "（已省略參數）";
+    }
+
     private static readonly string[] PassThroughPrefixes =
     {
         "about:", "data:", "edge:", "chrome:", "view-source:", "blob:", "javascript:", "mailto:",

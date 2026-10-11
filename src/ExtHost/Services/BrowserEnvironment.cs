@@ -17,7 +17,10 @@ public static class BrowserEnvironment
             AreBrowserExtensionsEnabled = true,
             Language = "zh-TW",
         };
-        return await CoreWebView2Environment.CreateAsync(null, AppPaths.UserData, options);
+        var env = await CoreWebView2Environment.CreateAsync(null, AppPaths.UserData, options);
+        env.BrowserProcessExited += (_, e) =>
+            AppPaths.Log($"WebView2 瀏覽器程序結束：{e.BrowserProcessExitKind}（PID {e.BrowserProcessId}）");
+        return env;
     }
 
     public static string? RuntimeVersion()

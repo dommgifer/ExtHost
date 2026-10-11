@@ -25,6 +25,9 @@ public partial class App : Application
         };
 
         AppPaths.EnsureCreated();
+        AppPaths.Log($"ExtHost 啟動（PID {Environment.ProcessId}）");
+        Exit += (_, args) => AppPaths.Log($"ExtHost 結束，結束碼 {args.ApplicationExitCode}");
+        SessionEnding += (_, args) => AppPaths.Log("Windows 登出或關機：" + args.ReasonSessionEnding);
 
         if (BrowserEnvironment.RuntimeVersion() == null)
         {
