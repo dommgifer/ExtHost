@@ -13,8 +13,9 @@ namespace ExtHost;
 public static class WebView2CloseGuard
 {
     private const string HandlerName = "CoreWebView2_WindowCloseRequested";
-    private static MethodInfo? _handler;
     private static bool _searched;
+    private static FieldInfo? _field;   // 方法所在物件的欄位；null 表示方法直接在控制項上
+    private static MethodInfo? _method;
 
     /// <summary>在 EnsureCoreWebView2Async 完成之後呼叫。</summary>
     public static void DetachDefaultHandler(WebView2 webView)
@@ -24,15 +25,21 @@ public static class WebView2CloseGuard
         {
             return;
         }
-        var method = FindHandler(webView.GetType());
-        if (method == null)
-        {
-            AppPaths.Log("找不到 WebView2 控制項內建的 window.close() 處理（SDK 可能已變更），網頁的 window.close() 可能會關閉整個視窗");
-            return;
-        }
         try
         {
-            var handler = (EventHandler<object>)Delegate.CreateDelegate(typeof(EventHandler<object>), webView, method);
+            EnsureSearched(webView.GetType());
+            if (_method == null)
+            {
+                AppPaths.Log("找不到 WebView2 控制項內建的 window.close() 處理（SDK 可能已變更），網頁的 window.close() 可能會關閉整個視窗");
+                return;
+            }
+            var target = _field == null ? webView : _field.GetValue(webView);
+            if (target == null)
+            {
+                AppPaths.Log("WebView2 控制項內部物件尚未建立，無法移除內建的 window.close() 處理");
+                return;
+            }
+            var handler = (EventHandler<object>)Delegate.CreateDelegate(typeof(EventHandler<object>), target, _method);
             core.WindowCloseRequested -= handler;
         }
         catch (Exception ex)
@@ -41,19 +48,57 @@ public static class WebView2CloseGuard
         }
     }
 
-    private static MethodInfo? FindHandler(Type type)
+    /// <summary>
+    /// 找出處理方法所在的物件：
+    /// 新版 SDK 的 WebView2 內部以欄位（m_webview2Base）持有 WebView2Base，方法在 WebView2Base 上；
+    /// 舊版則直接在 WebView2 或其父類別上。
+    /// </summary>
+    private static void EnsureSearched(Type controlType)
     {
         if (_searched)
         {
-            return _handler;
-        }
-        for (var t = type; t != null && _handler == null; t = t.BaseType)
-        {
-            _handler = t.GetMethod(HandlerName,
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly,
-                binder: null, types: new[] { typeof(object), typeof(object) }, modifiers: null);
+            return;
         }
         _searched = true;
-        return _handler;
+
+        _method = FindMethod(controlType);
+        if (_method != null)
+        {
+            return;
+        }
+
+        const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
+        var sdk = typeof(WebView2).Assembly;
+        for (var t = controlType; t != null && t.Assembly == sdk; t = t.BaseType)
+        {
+            foreach (var field in t.GetFields(flags))
+            {
+                if (field.FieldType.Assembly != sdk)
+                {
+                    continue;
+                }
+                var method = FindMethod(field.FieldType);
+                if (method != null)
+                {
+                    _field = field;
+                    _method = method;
+                    return;
+                }
+            }
+        }
+    }
+
+    private static MethodInfo? FindMethod(Type type)
+    {
+        const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
+        for (var t = type; t != null; t = t.BaseType)
+        {
+            var method = t.GetMethod(HandlerName, flags, binder: null, types: new[] { typeof(object), typeof(object) }, modifiers: null);
+            if (method != null)
+            {
+                return method;
+            }
+        }
+        return null;
     }
 }
