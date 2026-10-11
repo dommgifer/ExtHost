@@ -329,7 +329,7 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
         {
             if (!_isClosing)
             {
-                AppPaths.Log("最後一個分頁已關閉，關閉主視窗\n" + Environment.StackTrace);
+                AppPaths.Log("最後一個分頁已關閉，關閉主視窗");
                 Close();
             }
             return;
@@ -1488,8 +1488,11 @@ public partial class MainWindow : Window, IBrowserShell, IBookmarkHost
     private void OnClosing(object? sender, CancelEventArgs e)
     {
         _isClosing = true;
-        // 診斷用：記下是誰關閉了主視窗
-        AppPaths.Log($"主視窗關閉（剩 {_tabs.Count} 個分頁）\n{Environment.StackTrace}");
+        // 診斷用：正常關閉只記一行；若是 WebView2 觸發的（例如內建的 window.close() 處理沒移除成功）才附上呼叫堆疊
+        var stack = Environment.StackTrace;
+        AppPaths.Log(stack.Contains("Microsoft.Web.WebView2", StringComparison.Ordinal)
+            ? $"主視窗被 WebView2 關閉（剩 {_tabs.Count} 個分頁），這不是預期的行為：\n{stack}"
+            : $"主視窗關閉（剩 {_tabs.Count} 個分頁）");
 
         // 儲存分頁
         Settings.LastSession = _tabs
