@@ -223,6 +223,39 @@
                 </StackPanel>
             </Border>
 
+            <!-- WebView2 內建元件（不是使用者載入的，只顯示） -->
+            <StackPanel x:Name="BuiltInSection" Margin="0,28,16,0" Visibility="Collapsed">
+                <TextBlock Text="WebView2 內建元件" FontSize="16" FontWeight="Bold" />
+                <TextBlock FontSize="13" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,4,0,10"
+                           Text="WebView2 Runtime 自帶的元件（例如 PDF 檢視器），不是由 ExtHost 載入的，不會出現在工具列。停用可能讓相關功能失效（例如無法顯示 PDF），所以這裡只列出、不提供停用或移除。" />
+                <ItemsControl x:Name="BuiltInCards">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                                    CornerRadius="10" Padding="14,10" Margin="0,0,0,8">
+                                <DockPanel LastChildFill="True">
+                                    <Button DockPanel.Dock="Right" Style="{StaticResource SecondaryButton}" Content="重新啟用"
+                                            VerticalAlignment="Center" Click="BuiltInEnable_Click"
+                                            Visibility="{Binding CanReEnable, Converter={StaticResource BoolToVis}}" />
+                                    <StackPanel VerticalAlignment="Center">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                            <Border Background="{StaticResource AddressBrush}" CornerRadius="4" Padding="6,1" Margin="8,0,0,0"
+                                                    VerticalAlignment="Center" Visibility="{Binding HasStatus, Converter={StaticResource BoolToVis}}">
+                                                <TextBlock Text="{Binding StatusText}" FontSize="11" Foreground="{StaticResource MutedBrush}" />
+                                            </Border>
+                                        </StackPanel>
+                                        <TextBlock FontFamily="{StaticResource MonoFont}" FontSize="11" Foreground="{StaticResource MutedBrush}" Margin="0,2,0,0">
+                                            <Run Text="ID  " /><Run Text="{Binding DisplayId, Mode=OneWay}" />
+                                        </TextBlock>
+                                    </StackPanel>
+                                </DockPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+
             <TextBlock x:Name="DataFolderText" FontSize="12" Foreground="{StaticResource SubtleBrush}" Margin="0,20,0,0"
                        FontFamily="{StaticResource MonoFont}" TextWrapping="Wrap" />
         </StackPanel>

@@ -28,6 +28,15 @@ public sealed class ExtensionItem : INotifyPropertyChanged
     public string Version { get; set; } = "";
     public string Description { get; set; } = "";
     public bool IsInstalled { get; set; }
+
+    /// <summary>
+    /// WebView2 Runtime 自帶的元件擴充功能（例如 Microsoft Edge PDF Viewer），不是使用者透過 ExtHost 載入的。
+    /// 不顯示在工具列與擴充功能選單，管理頁只列出、不提供停用或移除。
+    /// </summary>
+    public bool IsBuiltIn { get; init; }
+
+    /// <summary>內建元件被停用時（例如舊版 ExtHost 可以停用它），提供重新啟用的方法。</summary>
+    public bool CanReEnable => IsBuiltIn && IsInstalled && !IsEnabled;
     public bool IsEnabled { get; set; }
     public string? LastError { get; set; }
     public ImageSource? Icon { get; set; }
@@ -40,7 +49,7 @@ public sealed class ExtensionItem : INotifyPropertyChanged
     public bool HasIcon => Icon != null;
     public bool IsDimmed => !IsInstalled || !IsEnabled;
     public string DisplayId => Id ?? "（尚未載入）";
-    public string DisplayPath => Path ?? "（路徑不明：不是由 ExtHost 載入的擴充功能）";
+    public string DisplayPath => Path ?? (IsBuiltIn ? "WebView2 內建元件" : "（路徑不明：不是由 ExtHost 載入的擴充功能）");
     public string StatusText => !IsInstalled ? "未載入" : IsEnabled ? "" : "已停用";
     public bool HasStatus => StatusText.Length > 0;
 

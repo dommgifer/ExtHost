@@ -25,6 +25,9 @@ public sealed class ExtensionManager
     /// <summary>工具列上顯示的擴充功能（已啟用）。</summary>
     public ObservableCollection<ExtensionItem> ToolbarItems { get; } = new();
 
+    /// <summary>WebView2 Runtime 自帶的元件擴充功能（不在 Items 中）。</summary>
+    public ObservableCollection<ExtensionItem> BuiltInItems { get; } = new();
+
     /// <summary>擴充功能清單有變動。</summary>
     public event EventHandler? Changed;
 
@@ -447,22 +450,38 @@ public sealed class ExtensionManager
         }
 
         var list = new List<ExtensionItem>();
+        var builtIn = new List<ExtensionItem>();
 
         foreach (var ext in installed)
         {
             var reg = _settings.Extensions.FirstOrDefault(r => r.Id == ext.Id);
+            if (reg == null)
+            {
+                // 不是透過 ExtHost 載入的：WebView2 Runtime 自帶的元件（PDF 檢視器等）
+                builtIn.Add(new ExtensionItem
+                {
+                    Key = "builtin:" + ext.Id,
+                    Id = ext.Id,
+                    Native = ext,
+                    IsInstalled = true,
+                    IsEnabled = ext.IsEnabled,
+                    IsBuiltIn = true,
+                    Name = ext.Name,
+                });
+                continue;
+            }
             var item = new ExtensionItem
             {
                 Key = "id:" + ext.Id,
                 Id = ext.Id,
                 Native = ext,
-                Path = reg?.Path,
+                Path = reg.Path,
                 IsInstalled = true,
                 IsEnabled = ext.IsEnabled,
                 Name = ext.Name,
             };
             FillFromManifest(item);
-            if (reg != null && _loadErrors.TryGetValue(reg.Path, out var err))
+            if (_loadErrors.TryGetValue(reg.Path, out var err))
             {
                 item.LastError = err;
             }
@@ -501,6 +520,12 @@ public sealed class ExtensionManager
         foreach (var i in list.Where(i => i.IsInstalled && i.IsEnabled))
         {
             ToolbarItems.Add(i);
+        }
+
+        BuiltInItems.Clear();
+        foreach (var i in builtIn.OrderBy(i => i.Name, StringComparer.CurrentCulture))
+        {
+            BuiltInItems.Add(i);
         }
 
         Changed?.Invoke(this, EventArgs.Empty);
