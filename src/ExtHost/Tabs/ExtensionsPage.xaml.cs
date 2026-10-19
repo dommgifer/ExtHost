@@ -39,6 +39,7 @@ public partial class ExtensionsPage : UserControl
             {
                 mgr.Changed += OnManagerChanged;
                 Cards.ItemsSource = mgr.Items;
+                BuiltInCards.ItemsSource = mgr.BuiltInItems;
             }
         }
         ApplyFilter();
@@ -50,6 +51,7 @@ public partial class ExtensionsPage : UserControl
     {
         var mgr = _shell.Extensions;
         EmptyText.Visibility = mgr == null || mgr.Items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        BuiltInSection.Visibility = mgr != null && mgr.BuiltInItems.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         if (mgr == null)
         {
             return;
@@ -106,6 +108,15 @@ public partial class ExtensionsPage : UserControl
         }
         var enable = (sender as CheckBox)?.IsChecked == true;
         await _shell.Extensions.SetEnabledAsync(item, enable);
+    }
+
+    private async void BuiltInEnable_Click(object sender, RoutedEventArgs e)
+    {
+        var item = ItemOf(sender);
+        if (item is { IsBuiltIn: true } && _shell.Extensions != null)
+        {
+            await _shell.Extensions.SetEnabledAsync(item, true);
+        }
     }
 
     private void Popup_Click(object sender, RoutedEventArgs e)

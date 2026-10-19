@@ -31,6 +31,8 @@
 
 ExtHost 只會記住資料夾路徑，不會複製檔案。移除擴充功能也不會刪除你的原始碼。
 
+WebView2 Runtime 本身會帶幾個元件擴充功能（例如 Microsoft Edge PDF Viewer、Microsoft Clipboard Extension）。它們不會出現在工具列和擴充功能選單，只列在管理頁下方的「WebView2 內建元件」，不能停用或移除（停用 PDF Viewer 會無法顯示 PDF）；如果之前被停用過，可以在那裡重新啟用。
+
 `samples\page-helper-demo` 是一個範例擴充功能，可以用來確認各項功能正常：
 
 - content script 注入浮動面板
